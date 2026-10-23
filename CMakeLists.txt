@@ -2,7 +2,8 @@ cmake_minimum_required(VERSION 3.16)
 
 include(ExternalProject)
 
-set(CMAKE_TOOLCHAIN_FILE toolchain.cmake)
+set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/toolchain.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/toolchain.cmake")
 project(ExistOS-for-HP39gii VERSION 0.1.0)
 
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)

@@ -140,7 +140,7 @@ void main_thread() {
     SystemUIInit();
     SystemFSInit();
     
-    // 初始化崩溃日志系统
+    // Initialize crash log system
     crash_log_init();
 
     // StartKhiCAS();

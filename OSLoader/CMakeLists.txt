@@ -109,7 +109,7 @@ target_compile_options(rom.elf PRIVATE -mtune=arm926ej-s -mcpu=arm926ej-s -mlitt
  
 
 add_custom_command(TARGET rom.elf POST_BUILD
-    COMMAND arm-none-eabi-size ${CMAKE_CURRENT_BINARY_DIR}/rom.elf 
+    COMMAND ${CMAKE_SIZE} ${CMAKE_CURRENT_BINARY_DIR}/rom.elf 
     )
 	
 add_custom_target(
@@ -118,19 +118,7 @@ add_custom_target(
   DEPENDS rom.elf 
   )
 
-if (${CMAKE_HOST_SYSTEM_NAME} STREQUAL "Windows")
-add_custom_target(
-  OSLoader.sb ALL
-  COMMAND ${CMAKE_SOURCE_DIR}/tools/sbtools_win/elftosb -z -c ${CMAKE_SOURCE_DIR}/Script/build_fw.bd -o ${CMAKE_CURRENT_BINARY_DIR}/OSLoader.sb ${CMAKE_CURRENT_BINARY_DIR}/rom.bin
-  DEPENDS rom.bin
-  )
-add_custom_target(
-  flash 
-  COMMAND ${CMAKE_SOURCE_DIR}/tools/sbtools_win/sb_loader -f ${CMAKE_CURRENT_BINARY_DIR}/OSLoader.sb 
-  DEPENDS OSLoader.sb
-  )
-else()
-if(EXISTS ${CMAKE_SOURCE_DIR}/tools/sbtools/  )
+if(EXISTS ${CMAKE_SOURCE_DIR}/tools/sbtools/elftosb)
 add_custom_target(
   OSLoader.sb ALL
   COMMAND ${CMAKE_SOURCE_DIR}/tools/sbtools/elftosb -z -c ${CMAKE_SOURCE_DIR}/Script/build_fw.bd -o ${CMAKE_CURRENT_BINARY_DIR}/OSLoader.sb ${CMAKE_CURRENT_BINARY_DIR}/rom.bin
@@ -141,9 +129,13 @@ add_custom_target(
   COMMAND ${CMAKE_SOURCE_DIR}/tools/sbtools/sbloader ${CMAKE_CURRENT_BINARY_DIR}/OSLoader.sb -d
   DEPENDS OSLoader.sb
   )
-else(EXISTS ${CMAKE_SOURCE_DIR}/tools/sbtools/elftosb)
-message(FATAL_ERROR "Please build tools/sbtools first")
-endif(EXISTS ${CMAKE_SOURCE_DIR}/tools/sbtools/elftosb)
+add_custom_target(
+  sb_flash 
+  COMMAND ${CMAKE_SOURCE_DIR}/tools/sbtools/sbloader ${CMAKE_CURRENT_BINARY_DIR}/OSLoader.sb -d
+  DEPENDS OSLoader.sb
+  )
+else()
+message(FATAL_ERROR "Please build tools/sbtools first (run ./build.sh or make -C tools/sbtools)")
 endif()
 
 add_custom_target(

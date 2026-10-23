@@ -3,10 +3,16 @@ CC := gcc
 CXX := g++
 LD := g++
 
+LOCAL_SYSROOT := $(HOME)/.local/sysroot
+ifneq ($(wildcard $(LOCAL_SYSROOT)/usr/lib/x86_64-linux-gnu/pkgconfig),)
+export PKG_CONFIG_PATH := $(LOCAL_SYSROOT)/usr/lib/x86_64-linux-gnu/pkgconfig:$(PKG_CONFIG_PATH)
+EXTRA_LDFLAGS := -Wl,-rpath,$(LOCAL_SYSROOT)/usr/lib/x86_64-linux-gnu
+endif
+
 LIBUSB := $(shell pkg-config --cflags libusb-1.0)
 CFLAGS := -O3 -g -std=c99 -Wall $(shell pkg-config --cflags libusb-1.0) $(DEFINES)
 CXXFLAGS := -O3 -g -Wall $(shell pkg-config --cflags libcrypto++) $(DEFINES)
-LDFLAGS := $(shell pkg-config --libs libusb-1.0) $(shell pkg-config --libs libcrypto++)
+LDFLAGS := $(EXTRA_LDFLAGS) $(shell pkg-config --libs libusb-1.0) $(shell pkg-config --libs libcrypto++)
 BINS := elftosb sbtoelf sbloader rsrctool elftosb1
 
 all: $(BINS)

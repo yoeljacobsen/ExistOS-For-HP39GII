@@ -38,13 +38,13 @@ aux_source_directory(./filesystem/fatfs                              SYS_SRCS)
 #aux_source_directory(./filesystem/littlefs                          SYS_SRCS)
 aux_source_directory(./crush                                         SYS_SRCS)
 
-# 添加getentropy.c文件到编译源文件
+# Add getentropy.c to system build sources
 list(APPEND SYS_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/core/getentropy.c)
 
 #add_subdirectory(gb)
 #add_subdirectory(KLib)
 add_subdirectory(KLib/tjpgdec)
-#add_subdirectory(emu48)
+add_subdirectory(emu48)
 add_subdirectory(applications/user/khicas)
 
 add_executable(sys.elf ${SYS_SRCS})
@@ -58,7 +58,7 @@ target_link_options(sys.elf PRIVATE ${LINKER_FLAGS})
 
  
 #target_compile_options(gb PRIVATE -mtune=arm926ej-s -mcpu=arm926ej-s -mlittle-endian -mfloat-abi=soft -mthumb -Ofast)
-#target_compile_options(emu48 PRIVATE -mtune=arm926ej-s -mcpu=arm926ej-s -mlittle-endian -mfloat-abi=soft -mthumb -Os)
+target_compile_options(emu48 PRIVATE -mtune=arm926ej-s -mcpu=arm926ej-s -mlittle-endian -mfloat-abi=soft -mthumb -Os)
 #target_compile_options(lvgl PRIVATE -mtune=arm926ej-s -mcpu=arm926ej-s -mlittle-endian -mfloat-abi=soft -mthumb -Os)
 target_compile_options(tjpgd PRIVATE -mtune=arm926ej-s -mcpu=arm926ej-s -mlittle-endian -mfloat-abi=soft -mthumb-interwork -mthumb -Os)
 
@@ -79,7 +79,7 @@ target_compile_options(sys.elf PRIVATE -mtune=arm926ej-s -mcpu=arm926ej-s -mlitt
 target_link_libraries(sys.elf -lm -lc -lrdimon -lgcc -lstdc++ -nostartfiles
 tjpgd
 #gb 
-#emu48
+emu48
 #lvgl
 ${CMAKE_SOURCE_DIR}/Libs/libkcasgui.libcpp
 #${CMAKE_SOURCE_DIR}/Libs/libmpy.libc
@@ -107,7 +107,7 @@ include_directories(${CMAKE_CURRENT_BINARY_DIR})
 add_dependencies(sys.elf timestamp)
 
 add_custom_command(TARGET sys.elf  POST_BUILD
-    COMMAND arm-none-eabi-size ${CMAKE_CURRENT_BINARY_DIR}/sys.elf 
+    COMMAND ${CMAKE_SIZE} ${CMAKE_CURRENT_BINARY_DIR}/sys.elf 
     )
 
 add_custom_target(

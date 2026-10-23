@@ -7,28 +7,28 @@
 extern "C" {
 #endif
 
-// USB服务
+// USB service
 void vTaskTinyUSB(void *pvParameters);
 
-// MTD服务
+// MTD service
 void vMTDSvc(void *pvParameters);
 
-// FTL服务
+// FTL service
 void vFTLSvc(void *pvParameters);
 
-// 键盘服务
+// Keyboard service
 void vKeysSvc(void *pvParameters);
 
-// 虚拟内存管理服务
+// Virtual memory manager service
 void vVMMgrSvc(void *pvParameters);
 
-// LLAPI服务
+// LLAPI service
 void vLLAPISvc(void *pvParameters);
 
-// 显示服务
+// Display service
 void vDispSvc(void *pvParameters);
 
-// 外部变量声明
+// External variable declarations
 extern bool g_vm_inited;
 
 #ifdef __cplusplus

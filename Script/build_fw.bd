@@ -14,7 +14,7 @@ driveTag = 0x50;
 
 sources {
 
-inputFile = extern(0);	//第0个输入文件
+inputFile = extern(0);	// Input file 0
 
 }
 

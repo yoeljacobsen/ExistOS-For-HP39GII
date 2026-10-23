@@ -3,11 +3,11 @@
 #include <stdio.h>
 #include "../crush/CrashLog.h"
 
-// 使用崩溃日志系统替换原有的PANIC宏
+// Use crash log system to handle system panics
 #define PANIC(...) \
     crash_handler(CRASH_TYPE_UNKNOWN, __FILE__, __LINE__, __VA_ARGS__)
 
-// 特定类型的崩溃宏
+// Specific crash type macros
 #define ASSERT_FAIL(...) \
     crash_handler(CRASH_TYPE_ASSERT, __FILE__, __LINE__, __VA_ARGS__)
 

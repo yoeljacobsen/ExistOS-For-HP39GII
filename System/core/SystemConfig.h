@@ -7,41 +7,41 @@
 extern "C" {
 #endif
 
-// 配置文件路径
+// Configuration file path
 #define CONFIG_FILE_PATH "/existos_config.json"
 
-// 配置项默认值
+// Default configuration values
 #define DEFAULT_LANGUAGE UI_LANG_EN
-#define DEFAULT_POWER_SAVE ' '  // ' ' = 关闭, 'S' = 低功耗, 'L' = 超低功耗
+#define DEFAULT_POWER_SAVE ' '  // ' ' = disabled, 'S' = power save, 'L' = ultra power save
 #define DEFAULT_ENABLE_CHARGE false
 #define DEFAULT_ENABLE_MEM_SWAP false
 
-// 系统配置结构体
+// System configuration structure
 typedef struct {
-    int language;           // 语言设置 (0=英文, 1=中文)
-    char power_save;        // 电源节省模式 (' ' = 关闭, 'S' = 低功耗, 'L' = 超低功耗)
-    bool enable_charge;     // 是否启用充电
-    bool charging;          // 充电状态
-    bool enable_mem_swap;   // 是否启用内存交换
-    bool mem_swap;          // 内存交换状态
-    bool dirty;             // 配置是否已修改但未保存
+    int language;           // Language setting (0 = English, 1 = Secondary/Legacy)
+    char power_save;        // Power save mode (' ' = off, 'S' = low power, 'L' = ultra low power)
+    bool enable_charge;     // Enable battery charging
+    bool charging;          // Current charging status
+    bool enable_mem_swap;   // Enable virtual memory swap
+    bool mem_swap;          // Memory swap status
+    bool dirty;             // Configuration modified but not saved
 } SystemConfig;
 
-// 配置管理函数
+// Configuration management functions
 void config_init(void);
 void config_load(void);
 void config_save(void);
 void config_reset_to_default(void);
 SystemConfig* config_get(void);
 
-// 获取和设置特定配置项的函数
+// Getters and setters for specific configuration items
 int config_get_language(void);
 void config_set_language(int lang);
 char config_get_power_save(void);
 void config_set_power_save(char mode);
 bool config_get_enable_charge(void);
 void config_set_enable_charge(bool enable);
-// 获取/设置充电状态
+// Get/set charging status
 bool config_get_charging(void);
 void config_set_charging(bool charging);
 

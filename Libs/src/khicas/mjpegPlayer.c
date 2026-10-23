@@ -18,19 +18,19 @@
 
 typedef struct
 {
-    DWORD fcc;                   // 必须为 avih
-    DWORD cb;                    // 本数据结构的大小，不包括最初的8个字节（fcc和cb两个域）
-    DWORD dwMicroSecPerFrame;    // 视频帧间隔时间（以毫秒为单位）
-    DWORD dwMaxBytesPerSec;      // 这个AVI文件的最大数据率
-    DWORD dwPaddingGranularity;  // 数据填充的粒度
-    DWORD dwFlags;               // AVI文件的全局标记，比如是否含有索引块等
-    DWORD dwTotalFrames;         // 总帧数
-    DWORD dwInitialFrames;       // 为交互格式指定初始帧数（非交互格式应该指定为0）
-    DWORD dwStreams;             // 本文件包含的流的个数
-    DWORD dwSuggestedBufferSize; // 建议读取本文件的缓存大小（应能容纳最大的块）
-    DWORD dwWidth;               // 视频图像的宽（以像素为单位）
-    DWORD dwHeight;              // 视频图像的高（以像素为单位）
-    DWORD dwReserved[4];         // 保留
+    DWORD fcc;                   // Must be 'avih'
+    DWORD cb;                    // Size of this structure, excluding the initial 8 bytes (fcc and cb fields)
+    DWORD dwMicroSecPerFrame;    // Frame interval in microseconds
+    DWORD dwMaxBytesPerSec;      // Maximum data rate of the AVI file
+    DWORD dwPaddingGranularity;  // Data padding granularity
+    DWORD dwFlags;               // Global AVI flags (e.g., whether an index chunk is present)
+    DWORD dwTotalFrames;         // Total number of frames
+    DWORD dwInitialFrames;       // Initial frame count for interleaved formats (0 for non-interleaved)
+    DWORD dwStreams;             // Number of streams in the file
+    DWORD dwSuggestedBufferSize; // Suggested buffer size for reading this file
+    DWORD dwWidth;               // Video width in pixels
+    DWORD dwHeight;              // Video height in pixels
+    DWORD dwReserved[4];         // Reserved
 } AVIMainHeader;
 
 typedef struct {
@@ -47,22 +47,22 @@ typedef struct {
 
 typedef struct
 {
-    DWORD fcc;                   // 必须为 strh
-    DWORD cb;                    // 本数据结构的大小,不包括最初的8个字节(fcc和cb两个域)
-    DWORD fccType;               // 流的类型: auds(音频流) vids(视频流) mids(MIDI流) txts(文字流)
-    DWORD fccHandler;            // 指定流的处理者，对于音视频来说就是解码器
-    DWORD dwFlags;               // 标记：是否允许这个流输出？调色板是否变化？
-    WORD wPriority;              // 流的优先级（当有多个相同类型的流时优先级最高的为默认流）
-    WORD wLanguage;              // 语言
-    DWORD dwInitialFrames;       // 为交互格式指定初始帧数
-    DWORD dwScale;               // 每帧视频大小或者音频采样大小
-    DWORD dwRate;                // dwScale/dwRate，每秒采样率
-    DWORD dwStart;               // 流的开始时间
-    DWORD dwLength;              // 流的长度（单位与dwScale和dwRate的定义有关）
-    DWORD dwSuggestedBufferSize; // 读取这个流数据建议使用的缓存大小
-    DWORD dwQuality;             // 流数据的质量指标（0 ~ 10,000）
-    DWORD dwSampleSize;          // Sample的大小
-    // RECT rcFrame;               // 指定这个流（视频流或文字流）在视频主窗口中的显示位置，视频主窗口由AVIMAINHEADER结构中的dwWidth和dwHeight决定
+    DWORD fcc;                   // Must be 'strh'
+    DWORD cb;                    // Size of this structure, excluding the initial 8 bytes (fcc and cb fields)
+    DWORD fccType;               // Stream type: 'auds' (audio), 'vids' (video), 'mids' (MIDI), 'txts' (text)
+    DWORD fccHandler;            // Stream handler (codec fourcc for audio/video)
+    DWORD dwFlags;               // Flags: stream output enabled, palette changes, etc.
+    WORD wPriority;              // Stream priority
+    WORD wLanguage;              // Language code
+    DWORD dwInitialFrames;       // Initial frame count for interleaved formats
+    DWORD dwScale;               // Time scale for video frame rate or audio sample rate
+    DWORD dwRate;                // Sample rate (dwRate / dwScale = samples or frames per second)
+    DWORD dwStart;               // Start time of stream
+    DWORD dwLength;              // Length of stream (in units defined by dwScale and dwRate)
+    DWORD dwSuggestedBufferSize; // Suggested buffer size for reading stream data
+    DWORD dwQuality;             // Stream quality indicator (0 ~ 10,000)
+    DWORD dwSampleSize;          // Size of a single data sample
+    // RECT rcFrame;             // Destination rectangle for video/text stream within main window
 } AVIStreamHeader;
 
 static lv_group_t *group_backup;

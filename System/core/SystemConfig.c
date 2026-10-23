@@ -6,10 +6,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-// 全局配置实例
+// Global configuration instance
 static SystemConfig g_config = {0};
 
-// 简单的JSON解析辅助函数
+// Simple JSON parser helper function
 static int find_json_value(const char* json, const char* key, char* value, int max_len) {
     char search_key[64];
     sprintf(search_key, "\"%s\":", key);
@@ -18,10 +18,10 @@ static int find_json_value(const char* json, const char* key, char* value, int m
     if (!key_pos) return -1;
     
     char* value_start = key_pos + strlen(search_key);
-    // 跳过空格
+    // Skip spaces
     while (*value_start == ' ') value_start++;
     
-    // 处理字符串值
+    // Handle string value
     if (*value_start == '"') {
         value_start++;
         char* value_end = strchr(value_start, '"');
@@ -33,7 +33,7 @@ static int find_json_value(const char* json, const char* key, char* value, int m
         value[len] = '\0';
         return 0;
     }
-    // 处理数字值
+    // Handle numeric/boolean value
     else {
         char* value_end = value_start;
         while (*value_end != '\0' && *value_end != ',' && *value_end != '}' && *value_end != ' ') value_end++;
@@ -46,16 +46,16 @@ static int find_json_value(const char* json, const char* key, char* value, int m
     }
 }
 
-// 初始化配置系统
+// Initialize configuration system
 void config_init(void) {
-    // 设置默认配置
+    // Set default configuration
     config_reset_to_default();
     
-    // 尝试加载配置文件
+    // Try loading configuration file
     config_load();
 }
 
-// 重置配置为默认值
+// Reset configuration to defaults
 void config_reset_to_default(void) {
     g_config.language = DEFAULT_LANGUAGE;
     g_config.power_save = DEFAULT_POWER_SAVE;
@@ -66,19 +66,19 @@ void config_reset_to_default(void) {
     g_config.dirty = false;
 }
 
-// 加载配置文件
+// Load configuration from file
 void config_load(void) {
     FIL file;
     FRESULT res;
     
-    // 尝试打开配置文件
+    // Try opening configuration file
     res = f_open(&file, CONFIG_FILE_PATH, FA_READ);
     if (res != FR_OK) {
-        // 文件不存在，使用默认配置
+        // File does not exist, use default configuration
         return;
     }
     
-    // 读取文件内容
+    // Read file contents
     char* buffer = (char*)malloc(1024);
     if (!buffer) {
         f_close(&file);
@@ -95,10 +95,10 @@ void config_load(void) {
         return;
     }
     
-    // 解析JSON
+    // Parse JSON
     char value[32];
     
-    // 解析语言设置
+    // Parse language setting
     if (find_json_value(buffer, "language", value, sizeof(value)) == 0) {
         g_config.language = atoi(value);
         if (g_config.language != UI_LANG_EN && g_config.language != UI_LANG_CN) {
@@ -106,7 +106,7 @@ void config_load(void) {
         }
     }
     
-    // 解析电源节省模式
+    // Parse power save mode
     if (find_json_value(buffer, "power_save", value, sizeof(value)) == 0) {
         g_config.power_save = value[0];
         if (g_config.power_save != ' ' && g_config.power_save != 'S' && g_config.power_save != 'L') {
@@ -114,29 +114,25 @@ void config_load(void) {
         }
     }
     
-    // 解析充电设置
+    // Parse charging setting
     if (find_json_value(buffer, "enable_charge", value, sizeof(value)) == 0) {
         g_config.enable_charge = (strcmp(value, "true") == 0);
     }
     
-    // 解析内存交换设置
+    // Parse memory swap setting
     if (find_json_value(buffer, "enable_mem_swap", value, sizeof(value)) == 0) {
         g_config.enable_mem_swap = (strcmp(value, "true") == 0);
     }
     
-
-    
-
-    
     free(buffer);
 }
 
-// 保存配置到文件
+// Save configuration to file
 void config_save(void) {
     FIL file;
     FRESULT res;
     
-    // 创建JSON字符串
+    // Create JSON string
     char json_buffer[512];
     sprintf(json_buffer, 
         "{\n"
@@ -151,29 +147,29 @@ void config_save(void) {
         g_config.enable_mem_swap ? "true" : "false"
     );
     
-    // 打开文件进行写入
+    // Open file for writing
     res = f_open(&file, CONFIG_FILE_PATH, FA_CREATE_ALWAYS | FA_WRITE);
     if (res != FR_OK) {
         return;
     }
     
-    // 写入JSON数据
+    // Write JSON data
     UINT bytes_written;
     res = f_write(&file, json_buffer, strlen(json_buffer), &bytes_written);
     f_close(&file);
     
-    // 如果写入失败，尝试删除可能损坏的文件
+    // If write failed, delete potentially corrupted file
     if (res != FR_OK || bytes_written != strlen(json_buffer)) {
         f_unlink(CONFIG_FILE_PATH);
     }
 }
 
-// 获取配置结构体指针
+// Get pointer to configuration struct
 SystemConfig* config_get(void) {
     return &g_config;
 }
 
-// 获取和设置特定配置项的函数
+// Getters and setters for specific configuration items
 int config_get_language(void) {
     return g_config.language;
 }
@@ -205,7 +201,7 @@ void config_set_enable_charge(bool enable) {
     config_save();
 }
 
-// 获取/设置充电状态
+// Get/set charging state
 bool config_get_charging(void) {
     return g_config.charging;
 }

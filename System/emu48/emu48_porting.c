@@ -7,6 +7,7 @@
 #include "task.h"
 
 #include "sys_llapi.h"
+#include "SystemUI.h"
 
 #include "emu48_kb_39g.h"
 #include "keyboard_gii39.h"
@@ -21,11 +22,8 @@ CRITICAL_SECTION csTxdLock;					// critical section for transmit byte
 CRITICAL_SECTION csRecvLock;				// critical section for receive byte
 CRITICAL_SECTION csSlowLock;				// critical section for speed slow down
 
-
 HANDLE           hEventShutdn;				// event handle to stop cpu thread
 HANDLE           hThread;
-
-
 
 BYTE   cCurrentRomType = 0;					// Model -> hardware
 UINT   nCurrentClass = 0;					// Class -> derivate
@@ -34,39 +32,36 @@ BOOL   bRomWriteable = TRUE;				// flag if ROM writeable
 LPBYTE pbyRom = NULL;
 DWORD  dwRomSize = 0;
 
-
 LPBYTE pbyPort2 = NULL;
 BOOL   bPort2Writeable = FALSE;
 BOOL   bPort2IsShared = FALSE;
 DWORD  dwPort2Size = 0;						// size of mapped port2
 DWORD  dwPort2Mask = 0;
 
-
 LARGE_INTEGER    lFreq;						// high performance counter frequency
 LARGE_INTEGER    lAppStart;					// high performance counter value at Appl. start
 
+static uint8_t *full_screen_buf = NULL;
 
-static uint8_t full_screen_buf[257 * 128];
+static TaskHandle_t hEmuWorkerTask = NULL;
+static TaskHandle_t hEmuTimerTask  = NULL;
+static TaskHandle_t hEmuDispTask   = NULL;
 
-
-bool rom_is_packed();
+bool rom_is_packed(void);
 int load_rom(const char *romfile);
-void *get_rom_addr();
-size_t get_rom_size();
+void unload_rom(void);
+int load_port_file(const char *path, void *buf, size_t size);
+int save_port_file(const char *path, const void *buf, size_t size);
+void *get_emu_rom_addr(void);
+size_t get_rom_size(void);
 
-void  __attribute__((target("arm"))) emu_thread(void *_)
+void __attribute__((target("arm"))) emu_thread(void *_)
 {
-    int ret;
-    ret = WorkerThread(NULL);
-
-
-    printf("WorkerThread Exit:%d\n",ret);
-    for(;;)
-    {
-        vTaskDelay(pdMS_TO_TICKS(20));
-    }
+    int ret = WorkerThread(NULL);
+    printf("WorkerThread Exit:%d\n", ret);
+    hEmuWorkerTask = NULL;
+    vTaskDelete(NULL);
 }
-
 
 typedef struct emu48_emu_timer_t
 {
@@ -76,10 +71,9 @@ typedef struct emu48_emu_timer_t
     uint32_t count;
     LPTIMECALLBACK cb;
     uint32_t userData;
-}emu48_emu_timer_t;
+} emu48_emu_timer_t;
 
 static emu48_emu_timer_t *emu_timers = NULL;
-
 
 uint32_t emu_add_timer(uint32_t period_ms, LPTIMECALLBACK cb, uint32_t userData, bool oneshot)
 {
@@ -87,22 +81,21 @@ uint32_t emu_add_timer(uint32_t period_ms, LPTIMECALLBACK cb, uint32_t userData,
     emu48_emu_timer_t *t_prev;
 
     vPortEnterCritical();
-    if(emu_timers)
-    {
+    if (emu_timers) {
         t = emu_timers;
-        do{
+        do {
             t_prev = t;
             t = t->next;
-        }while(t != NULL);
+        } while (t != NULL);
         t = pvPortMalloc(sizeof(emu48_emu_timer_t));
-    }else{
+    } else {
         t = emu_timers = pvPortMalloc(sizeof(emu48_emu_timer_t));
         t_prev = NULL;
     }
 
     assert(t != NULL);
 
-    memset(t, 0, sizeof(t));
+    memset(t, 0, sizeof(emu48_emu_timer_t));
 
     t->period_ms = period_ms;
     t->cb = cb;
@@ -111,7 +104,7 @@ uint32_t emu_add_timer(uint32_t period_ms, LPTIMECALLBACK cb, uint32_t userData,
     t->count = 0;
     t->next = NULL;
 
-    if(t_prev){
+    if (t_prev) {
         t_prev->next = t;
     }
     vPortExitCritical();
@@ -119,336 +112,269 @@ uint32_t emu_add_timer(uint32_t period_ms, LPTIMECALLBACK cb, uint32_t userData,
     return (uint32_t)t;
 }
 
-
 uint32_t emu_del_timer(emu48_emu_timer_t *t_del)
 {
-    emu48_emu_timer_t *t;
     emu48_emu_timer_t *t_prev;
 
-    if(emu_timers == NULL)
-    {
+    if (emu_timers == NULL || t_del == NULL) {
         return 0;
     }
 
     vPortEnterCritical();
 
-    if(t_del == emu_timers)
-    {
-        if(t_del->next)
-        {
-            t = t_del->next;
-            emu_timers = t;
-            vPortFree(t_del);
-            goto t_del_exit;
-        }else{
-            vPortFree(t_del);
-            emu_timers = NULL;
-            goto t_del_exit;
-        }
-    }else{
-
+    if (t_del == emu_timers) {
+        emu_timers = t_del->next;
+        vPortFree(t_del);
+    } else {
         t_prev = emu_timers;
-        while ((t_prev->next != NULL) && (t_prev->next != t_del))
-        {
+        while ((t_prev->next != NULL) && (t_prev->next != t_del)) {
             t_prev = t_prev->next;
-            goto t_del_found;
         }
-        goto t_del_exit;
-
-        t_del_found:
-        if(t_del->next)
-        {
+        if (t_prev->next == t_del) {
             t_prev->next = t_del->next;
             vPortFree(t_del);
-        }else{
-            t_prev->next = NULL;
-            vPortFree(t_del);
         }
-
-
     }
-
-    t_del_exit:
 
     vPortExitCritical();
     return 0;
 }
 
+static void emu_clear_all_timers(void)
+{
+    vPortEnterCritical();
+    while (emu_timers) {
+        emu48_emu_timer_t *next = emu_timers->next;
+        vPortFree(emu_timers);
+        emu_timers = next;
+    }
+    vPortExitCritical();
+}
 
-void  __attribute__((target("arm"))) emu_timer_thread(void *_)
+void __attribute__((target("arm"))) emu_timer_thread(void *_)
 {
     emu48_emu_timer_t *t;
-    for(;;)
-    {
-        if(emu_timers)
-        {
+    for (;;) {
+        if (emu_timers) {
             t = emu_timers;
-            do{
-                if((t->period_ms != 0) && (t->count < t->period_ms))
-                {
+            while (t != NULL) {
+                emu48_emu_timer_t *next_t = t->next;
+                if ((t->period_ms != 0) && (t->count < t->period_ms)) {
                     t->count += 10;
-                    if(t->count >= t->period_ms){
-                        if(t->oneshot)
-                        {
+                    if (t->count >= t->period_ms) {
+                        if (t->oneshot) {
                             t->cb((UINT)t, 0, t->userData, 0, 0);
                             emu_del_timer(t);
                             break;
-                            
-                        }else{
+                        } else {
                             t->count = 0;
                             t->cb((UINT)t, 0, t->userData, 0, 0);
                         }
                     }
                 }
-                t = t->next;
-            }while(t != NULL);
+                t = next_t;
+            }
         }
 
         vTaskDelay(pdMS_TO_TICKS(20));
     }
 }
 
-
 static bool need_Refresh = false;
 
-void emu48_update_display()
+void emu48_update_display(void)
 {
     need_Refresh = true;
 }
 
-void  __attribute__((target("arm")))  emu48_disp_update_task(void *_)
+void __attribute__((target("arm"))) emu48_disp_update_task(void *_)
 {
-    memset(full_screen_buf, 255, sizeof(full_screen_buf));
-    for(;;)
-    {
-        if(need_Refresh)
-        {
-                float sx,sy;
-                for(uint16_t y = 0; y < SCREENHEIGHT; y++)
-                {
-                    for(uint16_t x = 0; x < 144; x++)
-                    {
-                        sx = x * 1.96;
-                        sy = y * 2;
-                        if(sx < 255 && sy < 127){
-                            full_screen_buf[(int) (256 * (sy   ) + (sx   )) ] = pbyLcd[144 * y + x];
-                            full_screen_buf[(int) (256 * (sy +1) + (sx   )) ] = pbyLcd[144 * y + x];
-                            full_screen_buf[(int) (256 * (sy   ) + (sx +1)) ] = pbyLcd[144 * y + x];
-                            full_screen_buf[(int) (256 * (sy +1) + (sx +1)) ] = pbyLcd[144 * y + x];
-                        }
+    if (full_screen_buf) {
+        memset(full_screen_buf, 255, 256 * 128);
+    }
+    for (;;) {
+        if (need_Refresh && pbyLcd && full_screen_buf) {
+            for (uint16_t y = 0; y < SCREENHEIGHT; y++) {
+                uint16_t sy = y * 2;
+                if (sy >= 127) break;
+                for (uint16_t x = 0; x < 131; x++) {
+                    uint16_t sx = (x * 250) / 131;
+                    uint8_t pix = pbyLcd[144 * y + x];
+                    if (sx < 255) {
+                        full_screen_buf[256 * sy + sx] = pix;
+                        full_screen_buf[256 * (sy + 1) + sx] = pix;
+                        full_screen_buf[256 * sy + (sx + 1)] = pix;
+                        full_screen_buf[256 * (sy + 1) + (sx + 1)] = pix;
                     }
                 }
-                //ll_disp_put_area(pbyLcd, 0,0, 144 - 1, SCREENHEIGHT - 1);
-                ll_disp_put_area(full_screen_buf, 0,0, 255, 126);
-                need_Refresh = false;
+            }
+            ll_disp_put_area(full_screen_buf, 0, 0, 255, 126);
+            need_Refresh = false;
         }
-        vTaskDelay(pdMS_TO_TICKS(76));
+        vTaskDelay(pdMS_TO_TICKS(50));
     }
 }
 
 extern void *emu_rom_addr;
 
 static BYTE pbyNULL[16];
-//static BYTE pbyCODE[128];
-
 static BYTE pbyCODE_packed[64];
 static BYTE pbyCODE_unpacked[sizeof(pbyCODE_packed) * 2];
+
 LPBYTE FASTPTR(DWORD d)
 {
-	
-	LPBYTE lpbyPage;
-	
-	d &= 0xFFFFF;							// handle address overflows
+    LPBYTE lpbyPage;
 
-	if ((Chipset.IOCfig)&&((d&0xFFFC0)==Chipset.IOBase))
-		return Chipset.IORam+d-Chipset.IOBase;
+    d &= 0xFFFFF;							// handle address overflows
 
-	if ((lpbyPage = RMap[d>>12]) != NULL)	// page valid
-	{
-		lpbyPage += d & 0xFFF;				// full address
+    if ((Chipset.IOCfig) && ((d & 0xFFFC0) == Chipset.IOBase))
+        return Chipset.IORam + d - Chipset.IOBase;
 
-        if((uint32_t)lpbyPage >= 0x70000000)
-        {
-            //if((uint32_t)lpbyPage < 0x70000000 + dwRomSize * 2)
-            {
+    if ((lpbyPage = RMap[d >> 12]) != NULL)	// page valid
+    {
+        lpbyPage += d & 0xFFF;				// full address
 
-                //memcpy(pbyCODE, (void *)((uint32_t)lpbyPage - 0x70000000 + (uint32_t)emu_rom_addr) ,128);
-                //return pbyCODE;
+        if ((uint32_t)lpbyPage >= 0x70000000) {
+            uint32_t acc_addr = ((uint32_t)lpbyPage - 0x70000000) / 2 + (uint32_t)emu_rom_addr;
 
-                uint32_t acc_addr = ((uint32_t)lpbyPage - 0x70000000) / 2 + (uint32_t)emu_rom_addr;
+            memcpy(pbyCODE_packed, (void *)acc_addr, sizeof(pbyCODE_packed));
 
-                memcpy(pbyCODE_packed, (void *)acc_addr ,sizeof(pbyCODE_packed));
-
-                for(int i = 0, j = 0; i < sizeof(pbyCODE_packed); i++)
-                {
-                    pbyCODE_unpacked[j++] = pbyCODE_packed[i] & 0xF;
-                    pbyCODE_unpacked[j++] = pbyCODE_packed[i] >> 4;
-                }
-                return &pbyCODE_unpacked[(uint32_t)lpbyPage & 1];
-                
+            for (int i = 0, j = 0; i < (int)sizeof(pbyCODE_packed); i++) {
+                pbyCODE_unpacked[j++] = pbyCODE_packed[i] & 0xF;
+                pbyCODE_unpacked[j++] = pbyCODE_packed[i] >> 4;
             }
-        }else{
+            return &pbyCODE_unpacked[(uint32_t)lpbyPage & 1];
+        } else {
             return lpbyPage;
         }
-        //printf("RD CODE ERR:%08x\n", lpbyPage);
-	}
-	else
-	{
-		lpbyPage = pbyNULL;					// memory allocation
-		Npeek(lpbyPage, d, 13);				// fill with data (LA(8) = longest opcode)
-	}
-	return lpbyPage;
+    } else {
+        lpbyPage = pbyNULL;					// memory allocation
+        Npeek(lpbyPage, d, 13);				// fill with data (LA(8) = longest opcode)
+    }
+    return lpbyPage;
 }
 
 void emu48_main(int select)
 {
-    int ret;
-
-    ret = load_rom("/rom.39g");
-/*
-    if(select == 1)
-    {
-        ret = load_rom("/rom.39g");
-    }else if(select == 2)
-    {
-        ret = load_rom("/rom.39g.unpack");
+    int ret = load_rom("/rom.39g");
+    if (ret) {
+        printf("Failed to open ROM (/rom.39g or /rom.g39): %d\n", ret);
+        return;
     }
-    */
-
-    if(ret)
-    {
-        goto b_exit;
-    }
-
-    //pbyRom = get_rom_addr();
 
     pbyRom = (LPBYTE)0x70000000;
-
     dwRomSize = get_rom_size() * 2;
-/*
-    if(rom_is_packed())
-    {
-        dwRomSize *= 2;
-    }
-*/
+
     cCurrentRomType = 'E';
     nCurrentClass = 39;
-    
-
 
     pbyLcd = pvPortMalloc(144 * SCREENHEIGHT);
+    full_screen_buf = pvPortMalloc(256 * 128);
+    if (!pbyLcd || !full_screen_buf) {
+        if (pbyLcd) {
+            vPortFree(pbyLcd);
+            pbyLcd = NULL;
+        }
+        if (full_screen_buf) {
+            vPortFree(full_screen_buf);
+            full_screen_buf = NULL;
+        }
+        unload_rom();
+        return;
+    }
+    memset(pbyLcd, 255, 144 * SCREENHEIGHT);
 
     QueryPerformanceFrequency(&lFreq);
     QueryPerformanceCounter(&lAppStart);
 
-    
-	ZeroMemory(&Chipset,sizeof(Chipset));
-	ZeroMemory(&RMap,sizeof(RMap));			// delete MMU mappings
-	ZeroMemory(&WMap,sizeof(WMap));
+    ZeroMemory(&Chipset, sizeof(Chipset));
+    ZeroMemory(&RMap, sizeof(RMap));			// delete MMU mappings
+    ZeroMemory(&WMap, sizeof(WMap));
 
     Chipset.type = cCurrentRomType;
 
-	if (Chipset.type == 'E')				// HP39/40G
-	{
-		Chipset.Port0Size = 128;
-		Chipset.Port1Size = 0;
-		Chipset.Port2Size = 128;
+    if (Chipset.type == 'E')				// HP39/40G
+    {
+        Chipset.Port0Size = 128;
+        Chipset.Port1Size = 0;
+        Chipset.Port2Size = 128;
 
-		Chipset.cards_status = 0xF;
+        Chipset.cards_status = 0xF;
 
-		bPort2Writeable = TRUE;				// port2 is writeable
-	}
-    Chipset.IORam[LPE] = RST;	
-
-    //pdwInstrArray = HeapAlloc(hHeap,0,256*sizeof(*pdwInstrArray));
+        bPort2Writeable = TRUE;				// port2 is writeable
+    }
+    Chipset.IORam[LPE] = RST;
 
     SetSpeed(bRealSpeed);
     SetLcdMode(bGrayscale);
 
-	// allocate port memory
-	if (Chipset.Port0Size)
-	{
-		Chipset.Port0 = HeapAlloc(hHeap,HEAP_ZERO_MEMORY,Chipset.Port0Size*2048);
-		_ASSERT(Chipset.Port0 != NULL);
-	}
-	if (Chipset.Port1Size)
-	{
-		Chipset.Port1 = HeapAlloc(hHeap,HEAP_ZERO_MEMORY,Chipset.Port1Size*2048);
-		_ASSERT(Chipset.Port1 != NULL);
-	}
-	if (Chipset.Port2Size)
-	{
-		Chipset.Port2 = HeapAlloc(hHeap,HEAP_ZERO_MEMORY,Chipset.Port2Size*2048);
-		_ASSERT(Chipset.Port2 != NULL);
-	}
-    //FlashInit();
+    // allocate port memory and restore saved state if present
+    if (Chipset.Port0Size) {
+        Chipset.Port0 = HeapAlloc(hHeap, HEAP_ZERO_MEMORY, Chipset.Port0Size * 2048);
+        _ASSERT(Chipset.Port0 != NULL);
+        load_port_file("/port0.39g", Chipset.Port0, Chipset.Port0Size * 2048);
+    }
+    if (Chipset.Port1Size) {
+        Chipset.Port1 = HeapAlloc(hHeap, HEAP_ZERO_MEMORY, Chipset.Port1Size * 2048);
+        _ASSERT(Chipset.Port1 != NULL);
+    }
+    if (Chipset.Port2Size) {
+        Chipset.Port2 = HeapAlloc(hHeap, HEAP_ZERO_MEMORY, Chipset.Port2Size * 2048);
+        _ASSERT(Chipset.Port2 != NULL);
+        load_port_file("/port2.39g", Chipset.Port2, Chipset.Port2Size * 2048);
+    }
 
-	RomSwitch(0);							// boot ROM view of HP49G and map memory
+    RomSwitch(0);							// boot ROM view and map memory
 
-/*
-    if (pbyRom)
-	{
-		//SetWindowLocation(hWnd,Chipset.nPosX,Chipset.nPosY);
-		Map(0x00,0xFF);
-	}
-*/
+    CpuReset();
+    Chipset.Shutdn = FALSE;					// automatic restart
 
-	CpuReset();
-	Chipset.Shutdn = FALSE;				// automatic restart
+    nState     = SM_RUN;					// init state must be <> nNextState
+    nNextState = SM_INVALID;				// go into invalid state
 
-
-	nState     = SM_RUN;					// init state must be <> nNextState
-	nNextState = SM_INVALID;				// go into invalid state
-
-    xTaskCreate(emu_thread, "emu48", 32768, NULL, configMAX_PRIORITIES - 3, NULL);
-    xTaskCreate(emu_timer_thread, "emu48 timer", 1000, NULL, configMAX_PRIORITIES - 3, NULL);
-    xTaskCreate(emu48_disp_update_task, "emu48 timer", 1000, NULL, configMAX_PRIORITIES - 3, NULL);
+    xTaskCreate(emu_thread, "emu48", 4096, NULL, configMAX_PRIORITIES - 3, &hEmuWorkerTask);
+    xTaskCreate(emu_timer_thread, "emu48_tmr", 1000, NULL, configMAX_PRIORITIES - 3, &hEmuTimerTask);
+    xTaskCreate(emu48_disp_update_task, "emu48_disp", 1000, NULL, configMAX_PRIORITIES - 3, &hEmuDispTask);
 
     ll_cpu_slowdown_enable(false);
 
     printf("emu_thread Created\n");
 
-
-    vTaskDelay(pdMS_TO_TICKS(1000));
-
+    vTaskDelay(pdMS_TO_TICKS(500));
     SwitchToState(SM_RUN);
-    vTaskDelay(pdMS_TO_TICKS(5000));
-
 
     int on_press = 0;
-    for(;;)
-    {
-        //printf("emu cpu pc:%08x\n", Chipset.pc);
+    uint32_t last_key = 0;
+    uint32_t last_press = 0;
 
+    for (;;) {
         uint32_t keys, key, kpress;
-        static uint32_t last_key;
-        static uint32_t last_press;
-        
-        do{
+
+        do {
             keys = ll_vm_check_key();
             key = keys & 0xFFFF;
             kpress = keys >> 16;
 
-            vTaskDelay(pdMS_TO_TICKS(40));
+            vTaskDelay(pdMS_TO_TICKS(30));
 
-            if(on_press > 0)
-            {
+            if (on_press > 0) {
                 on_press--;
-                if(on_press == 1)
-                {
+                if (on_press == 1) {
                     KeyboardEvent(false, KEY_39G_ON.out, KEY_39G_ON.in);
                 }
             }
+        } while ((last_key == key) && (last_press == kpress));
 
-        }while((last_key == key) && (last_press == kpress));
+        // Exit Emu48 when ON + F3 (or F3 while ON hold timer active) is pressed
+        if (kpress && key == KEY_F3 && on_press > 0) {
+            KeyboardEvent(false, KEY_39G_ON.out, KEY_39G_ON.in);
+            break;
+        }
 
         #define KEYEVENT(name)  KeyboardEvent(kpress, name.out, name.in)
         #define KEY_CASE(w, s)  case w: KEYEVENT(s); break
 
-
-
-        switch (key)
-        {
+        switch (key) {
             KEY_CASE(KEY_F1, KEY_39G_F1);
             KEY_CASE(KEY_F2, KEY_39G_F2);
             KEY_CASE(KEY_F3, KEY_39G_F3);
@@ -478,7 +404,7 @@ void emu48_main(int select)
             KEY_CASE(KEY_X2              , KEY_39G_X2             );
             KEY_CASE(KEY_XY              , KEY_39G_XY             );
             KEY_CASE(KEY_LEFTBRACKET     , KEY_39G_LEFTBRACKET    );
-            KEY_CASE(KEY_RIGHTBRACKET     , KEY_39G_RIGHTBRACKET   );
+            KEY_CASE(KEY_RIGHTBRACKET    , KEY_39G_RIGHTBRACKET   );
             KEY_CASE(KEY_DIVISION        , KEY_39G_DIVISION       );
 
             KEY_CASE(KEY_COMMA         , KEY_39G_COMMA         );
@@ -499,12 +425,10 @@ void emu48_main(int select)
             KEY_CASE(KEY_3            , KEY_39G_3            );
             KEY_CASE(KEY_PLUS         , KEY_39G_PLUS         );
 
-            //KEY_CASE(KEY_ON           , KEY_39G_ON           );
             KEY_CASE(KEY_0            , KEY_39G_0            );
             KEY_CASE(KEY_DOT          , KEY_39G_DOT          );
             KEY_CASE(KEY_NEGATIVE     , KEY_39G_NEGATIVE     );
             KEY_CASE(KEY_ENTER        , KEY_39G_ENTER        );
-
 
             KEY_CASE(KEY_RIGHT    , KEY_39G_RIGHT   );
             KEY_CASE(KEY_DOWN     , KEY_39G_DOWN    );
@@ -512,48 +436,78 @@ void emu48_main(int select)
             KEY_CASE(KEY_UP       , KEY_39G_UP      );
 
             case KEY_ON:
-                {
-                    KeyboardEvent(true, KEY_39G_ON.out, KEY_39G_ON.in);
-                    on_press = 10;
-                }
+                KeyboardEvent(true, KEY_39G_ON.out, KEY_39G_ON.in);
+                on_press = 15;
+                break;
 
-        
-        default:
-            break;
+            default:
+                break;
         }
-
-
 
         last_key = key;
         last_press = kpress;
-
-
     }
 
-    b_exit:
+    // Stop emulation and clean up resources
+    SwitchToState(SM_INVALID);
+    vTaskDelay(pdMS_TO_TICKS(100));
 
-    printf("Failed to open rom:%d\n", ret);
+    if (hEmuDispTask) {
+        vTaskDelete(hEmuDispTask);
+        hEmuDispTask = NULL;
+    }
+    if (hEmuTimerTask) {
+        vTaskDelete(hEmuTimerTask);
+        hEmuTimerTask = NULL;
+    }
+    if (hEmuWorkerTask) {
+        vTaskDelete(hEmuWorkerTask);
+        hEmuWorkerTask = NULL;
+    }
+    emu_clear_all_timers();
 
-/*
-    for(;;)
-    {
-        vTaskDelay(pdMS_TO_TICKS(20));
-    }*/
-
+    if (Chipset.Port0 && Chipset.Port0Size) {
+        save_port_file("/port0.39g", Chipset.Port0, Chipset.Port0Size * 2048);
+        HeapFree(hHeap, 0, Chipset.Port0);
+        Chipset.Port0 = NULL;
+    }
+    if (Chipset.Port1 && Chipset.Port1Size) {
+        HeapFree(hHeap, 0, Chipset.Port1);
+        Chipset.Port1 = NULL;
+    }
+    if (Chipset.Port2 && Chipset.Port2Size) {
+        save_port_file("/port2.39g", Chipset.Port2, Chipset.Port2Size * 2048);
+        HeapFree(hHeap, 0, Chipset.Port2);
+        Chipset.Port2 = NULL;
+    }
+    if (pbyLcd) {
+        vPortFree(pbyLcd);
+        pbyLcd = NULL;
+    }
+    if (full_screen_buf) {
+        vPortFree(full_screen_buf);
+        full_screen_buf = NULL;
+    }
+    unload_rom();
 }
 
-#include "SystemUI.h"
 void __attribute__((target("arm"))) emu48_task(void *_)
 {
     SystemUISuspend();
     emu48_main(0);
+    SystemUIResume();
+    vTaskDelete(NULL);
+}
+
+void StartEmu48(void)
+{
+    xTaskCreate(emu48_task, "Emu48", 2048, NULL, configMAX_PRIORITIES - 3, NULL);
 }
 
 void EnterCriticalSection(CRITICAL_SECTION *obj)
 {
     vPortEnterCritical();
 }
-
 
 void LeaveCriticalSection(CRITICAL_SECTION *obj)
 {
@@ -562,10 +516,7 @@ void LeaveCriticalSection(CRITICAL_SECTION *obj)
 
 void SetEvent(HANDLE h)
 {
-
-    
 }
-
 
 BOOL ResetEvent(HANDLE h)
 {
@@ -580,125 +531,88 @@ DWORD WaitForSingleObject(HANDLE hHandle, int dwMilliseconds)
 BOOL QueryPerformanceCounter(PLARGE_INTEGER l)
 {
     l->QuadPart = ll_get_time_us();
-    //printf("chktime:%ld\n", l->d.LwPart);
+    return TRUE;
 }
-
 
 MMRESULT timeSetEvent(UINT uDelay, UINT uResolution, LPTIMECALLBACK fptc, DWORD_PTR dwUser, UINT fuEvent) 
 {
-    //printf("set timer:%d, %d, %d\n", uDelay, dwUser, fuEvent);
-    
     return (MMRESULT)emu_add_timer(uDelay, fptc, (uint32_t)dwUser, fuEvent == TIME_ONESHOT);
 }
 
-
 MMRESULT timeKillEvent(UINT uTimerID)
 {
-    //printf("del timer:%08x\n", uTimerID);
     emu_del_timer((emu48_emu_timer_t *)uTimerID);
     return 0;
 }
 
 VOID DisableDebugger(VOID)
 {
-
 }
 
 VOID GetLocalTime(struct SYSTEMTIME *lpSystemTime) {
-    if(lpSystemTime) {
-
-        lpSystemTime->wYear = 2022;
-        lpSystemTime->wMonth = 8;
-        //lpSystemTime->wDayOfWeek = 2;
-        lpSystemTime->wDay = 23;
-        lpSystemTime->wHour = 10;
-        lpSystemTime->wMinute = 10 ;
-        lpSystemTime->wSecond = ll_get_time_ms()/1000 ;
-        lpSystemTime->wMilliseconds = ll_get_time_us() ;
-        /*
-        struct timespec ts = {0, 0};
-        struct tm tm = {};
-        clock_gettime(CLOCK_REALTIME, &ts);
-        time_t tim = ts.tv_sec;
-        localtime_r(&tim, &tm);
-        lpSystemTime->wYear = (WORD) (1900 + tm.tm_year);
-        lpSystemTime->wMonth = (WORD) (1 + tm.tm_mon);
-        lpSystemTime->wDayOfWeek = (WORD) (tm.tm_wday);
-        lpSystemTime->wDay = (WORD) (tm.tm_mday);
-        lpSystemTime->wHour = (WORD) (tm.tm_hour);
-        lpSystemTime->wMinute = (WORD) (tm.tm_min);
-        lpSystemTime->wSecond = (WORD) (tm.tm_sec);
-        lpSystemTime->wMilliseconds = (WORD) (ts.tv_nsec / 1e6);
-        */
+    if (lpSystemTime) {
+        uint32_t sec = ll_rtc_get_sec();
+        lpSystemTime->wYear = 2026;
+        lpSystemTime->wMonth = 1;
+        lpSystemTime->wDay = 1;
+        lpSystemTime->wHour = (sec / 3600) % 24;
+        lpSystemTime->wMinute = (sec / 60) % 60;
+        lpSystemTime->wSecond = sec % 60;
+        lpSystemTime->wMilliseconds = (ll_get_time_ms() % 1000);
     }
 }
 
 MMRESULT timeGetDevCaps(struct TIMECAPS *ptc, UINT cbtc) {
-    if(ptc) {
+    if (ptc) {
         ptc->wPeriodMin = 1; // ms
         ptc->wPeriodMax = 1000000; // ms -> 1000s
     }
-    return 0; //No error
+    return 0; // No error
 }
 
 MMRESULT timeBeginPeriod(UINT uPeriod) {
-    //TODO
-    return 0; //No error
+    return 0; // No error
 }
+
 MMRESULT timeEndPeriod(UINT uPeriod) {
-    //TODO
-    return 0; //No error
+    return 0; // No error
 }
 
 VOID UpdateWindowStatus(VOID)
 {
-
 }
-
 
 DWORD timeGetTime(void)
 {
-    time_t t = ll_get_time_ms();//;time(NULL);
+    time_t t = ll_get_time_ms();
     return (DWORD)t;
-    //return (DWORD)(t * 1000);
 }
 
 BOOL QueryPerformanceFrequency(PLARGE_INTEGER l) {
-    //https://msdn.microsoft.com/en-us/library/windows/desktop/ms644904(v=vs.85).aspx
     l->QuadPart = 1000000;
     return TRUE;
 }
 
 BOOL CheckBreakpoint(DWORD dwAddr, DWORD dwRange, UINT nType)
 {
-	return FALSE;
+    return FALSE;
 }
 
 VOID NotifyDebugger(INT nType)				// update registers
 {
-    /*
-	nRplBreak = nType;						// save breakpoint type
-	_ASSERT(hDlgDebug);						// debug dialog box open
-	PostMessage(hDlgDebug,WM_UPDATE,0,0);*/
-	return;
+    return;
 }
 
 VOID UpdatePatches(BOOL bPatch)
 {
-
 }
 
 VOID UpdateDbgCycleCounter(VOID)
 {
-	// update 64 bit cpu cycle counter
-	//if (Chipset.cycles < dwDbgRefCycles) ++Chipset.cycles_reserved;
-
-	//dwDbgRefCycles = (DWORD) (Chipset.cycles & 0xFFFFFFFF);
-    
-	return;
+    return;
 }
 
 void OutputDebugString(char *s)
 {
-    printf("%s\n",s);
+    printf("%s\n", s);
 }

@@ -175,37 +175,37 @@ static void GPMI_DMAChainsInit()
 {
     // ============================================Command Chains================================================
     //  Phase 1: Wait for ready;
-    chains_cmd[0].dma_cmd       =   BF_APBH_CHn_CMD_CMDWORDS(1)         |          // 发送1个PIO命令到GPMI控制器
-                                    BF_APBH_CHn_CMD_WAIT4ENDCMD(1)      |          // 完成当前命令之后再继续执行
-                                    BF_APBH_CHn_CMD_NANDWAIT4READY(1)   |          // 等待NAND就绪后开始执行
-                                    BF_APBH_CHn_CMD_NANDLOCK(0)         |          // 锁住NAND防止被其它DMA通道占用
-                                    BF_APBH_CHn_CMD_CHAIN(1)            |          // 还有剩下的描述符链
+    chains_cmd[0].dma_cmd       =   BF_APBH_CHn_CMD_CMDWORDS(1)         |          // Send 1 PIO command word to the GPMI controller
+                                    BF_APBH_CHn_CMD_WAIT4ENDCMD(1)      |          // Wait for current command to complete before continuing
+                                    BF_APBH_CHn_CMD_NANDWAIT4READY(1)   |          // Wait for NAND to be ready before executing
+                                    BF_APBH_CHn_CMD_NANDLOCK(0)         |          // Lock NAND to prevent other DMA channels from taking over
+                                    BF_APBH_CHn_CMD_CHAIN(1)            |          // Follow remaining descriptor chain
                                     BV_FLD(APBH_CHn_CMD, COMMAND, NO_DMA_XFER);
 
     chains_cmd[0].dma_bar       =   0;
 
-    chains_cmd[0].gpmi_ctrl0    =   BV_FLD(GPMI_CTRL0, COMMAND_MODE, WAIT_FOR_READY)            | // 当前模式：等待NAND就绪
+    chains_cmd[0].gpmi_ctrl0    =   BV_FLD(GPMI_CTRL0, COMMAND_MODE, WAIT_FOR_READY)            | // Mode: wait for NAND ready
                                     BF_GPMI_CTRL0_TIMEOUT_IRQ_EN(0)             |
-                                    BF_GPMI_CTRL0_WORD_LENGTH(BV_GPMI_CTRL0_WORD_LENGTH__8_BIT) | // 8bit总线模式
-                                    BV_FLD(GPMI_CTRL0, ADDRESS, NAND_DATA)                      | // 数据模式
-                                    BF_GPMI_CTRL0_CS(CHIP_SEL);                                   // 片选
+                                    BF_GPMI_CTRL0_WORD_LENGTH(BV_GPMI_CTRL0_WORD_LENGTH__8_BIT) | // 8-bit bus mode
+                                    BV_FLD(GPMI_CTRL0, ADDRESS, NAND_DATA)                      | // Data mode
+                                    BF_GPMI_CTRL0_CS(CHIP_SEL);                                   // Chip select
 
     chains_cmd[0].dma_nxtcmdar  =   (uint32_t)&chains_cmd[1];
 
     //  Phase 2: Send command and address; Lock the nand flash
-    chains_cmd[1].dma_cmd       =   BF_APBH_CHn_CMD_XFER_COUNT(1 + 00000000)    | // 1字节命令 和剩下的地址数据
-                                    BF_APBH_CHn_CMD_CMDWORDS(3)                 | // 发送3个PIO命令到GPMI控制器
-                                    BF_APBH_CHn_CMD_WAIT4ENDCMD(1)              | // 等待NAND就绪后开始执行
+    chains_cmd[1].dma_cmd       =   BF_APBH_CHn_CMD_XFER_COUNT(1 + 00000000)    | // 1-byte command plus remaining address bytes
+                                    BF_APBH_CHn_CMD_CMDWORDS(3)                 | // Send 3 PIO command words to the GPMI controller
+                                    BF_APBH_CHn_CMD_WAIT4ENDCMD(1)              | // Wait for command completion before continuing
                                     BF_APBH_CHn_CMD_SEMAPHORE(0)                |
                                     BF_APBH_CHn_CMD_NANDWAIT4READY(0)           |
                                     BF_APBH_CHn_CMD_NANDLOCK(1)                 |
                                     BF_APBH_CHn_CMD_IRQONCMPLT(0)               |
                                     BF_APBH_CHn_CMD_CHAIN(1)                    |
-                                    BV_FLD(APBH_CHn_CMD, COMMAND, DMA_READ);      // 从内存读取，发送到NAND
+                                    BV_FLD(APBH_CHn_CMD, COMMAND, DMA_READ);      // Read from memory and send to NAND
 
     chains_cmd[1].dma_bar       =   00000000;
 
-    chains_cmd[1].gpmi_ctrl0    =   BV_FLD(GPMI_CTRL0, COMMAND_MODE, WRITE)     | // 写入NAND
+    chains_cmd[1].gpmi_ctrl0    =   BV_FLD(GPMI_CTRL0, COMMAND_MODE, WRITE)     | // Write to NAND
                                     BV_FLD(GPMI_CTRL0, WORD_LENGTH, 8_BIT)      |
                                     BV_FLD(GPMI_CTRL0, LOCK_CS, DISABLED)       |
                                     BF_GPMI_CTRL0_TIMEOUT_IRQ_EN(0)             |
@@ -961,7 +961,7 @@ static inline void    GPMI_sendCommand(uint32_t *cmd, uint32_t *para, uint16_t p
         chains_cmd[1].dma_nxtcmdar  =   (uint32_t)&chains_cmd[3];
     }
 
-    BF_WRn(APBH_CHn_NXTCMDAR, NAND_DMA_Channel, CMD_ADDR, (reg32_t)&chains_cmd); // 填写DMA寄存器下个描述符地址
+    BF_WRn(APBH_CHn_NXTCMDAR, NAND_DMA_Channel, CMD_ADDR, (reg32_t)&chains_cmd); // Write next descriptor address to DMA register
     BW_APBH_CHn_SEMA_INCREMENT_SEMA(NAND_DMA_Channel, 1);   
 
     if(block){

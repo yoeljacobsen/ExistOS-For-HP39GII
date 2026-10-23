@@ -1,5 +1,5 @@
 
-// -*- coding: GBK -*-
+// -*- coding: UTF-8 -*-
 
 #include "FreeRTOS.h"
 #include "task.h"
@@ -21,7 +21,7 @@
 #include "UI_build_stamp.h"
 #include "SystemConfig.h"
 
-// 声明enableMemSwap函数
+// Declare enableMemSwap function
 extern "C" void enableMemSwap(bool enable);
 
 #include "ExistOSlogo.h"
@@ -42,8 +42,9 @@ extern "C" {
 #include "../applications/user/khicas/khicas_ico.c"
 
 extern const unsigned char gImage_khicas_ico[48 * 48];
+extern const unsigned char gImage_emu48_ico[48 * 48];
 
-// 移除静态变量，改为使用配置系统
+// Use configuration system instead of static variables
 // static char power_save = ' ';
 // static int language = UI_LANG_EN;
 
@@ -163,7 +164,7 @@ int exf_getfree(uint8_t *drv, uint32_t *total, uint32_t *free) {
     UI_Enable_Mem_Swap = UI_Enable_Mem_Swap_##lang;
 
 void UI_SetLang(int lang) {
-    // 保存语言设置到配置系统
+    // Save language setting to configuration system
     config_set_language(lang);
     
     switch (lang) {
@@ -277,7 +278,7 @@ void pageUpdate() {
 
             line = 3;
             uidisp->draw_printf(DISPX + (DISPW - (8 * 29)) / 2, DISPY - 8 + 16 * line++, 16, 64, 255, "Open Source Firmware Project");
-            uidisp->draw_printf(DISPX + (DISPW - (16 * 9 + 8 * 7)) / 2, DISPY - 8 + 16 * line++, 16, 64, 255, "HP39GII开源固件项目");
+            uidisp->draw_printf(DISPX + (DISPW - (8 * 21)) / 2, DISPY - 8 + 16 * line++, 16, 64, 255, "for HP 39gII Graphing");
             uidisp->draw_printf(DISPX + 16, DISPY - 4 + 16 * line, 8, 64, 255, "github.com/ExistOS-Team");
             uidisp->draw_printf(DISPX + DISPW - 16 - 6 * 21, DISPY - 4 + 16 * line + 8, 8, 64, 255, "/ExistOS-For-HP39GII");
         }
@@ -297,13 +298,16 @@ void drawPage(int page) {
     switch (page) {
     case 0:
         uidisp->draw_bmp((char *)gImage_khicas_ico, mainw->content_x0 + 12, mainw->content_y0 + 12, 48, 48);
-
         uidisp->draw_printf(mainw->content_x0 + 12,
                             mainw->content_y0 + 12 + 48 + 1, 16, 0, 0xFF, "KhiCAS");
 
-        uidisp->draw_box((mainw->content_x0 + 12) + appPage_select * (48 + appPage_select * 32),
+        uidisp->draw_bmp((char *)gImage_emu48_ico, mainw->content_x0 + 92, mainw->content_y0 + 12, 48, 48);
+        uidisp->draw_printf(mainw->content_x0 + 96,
+                            mainw->content_y0 + 12 + 48 + 1, 16, 0, 0xFF, "Emu48");
+
+        uidisp->draw_box((mainw->content_x0 + 12) + appPage_select * 80,
                          mainw->content_y0 + 12,
-                         (mainw->content_x0 + 12) + 48 + appPage_select * (48 + appPage_select * 32),
+                         (mainw->content_x0 + 12) + 48 + appPage_select * 80,
                          mainw->content_y0 + 12 + 48,
                          0,
                          -1);
@@ -694,9 +698,11 @@ void keyMsg(uint32_t key, int state) {
         case KEY_ENTER:
             if (curPage == 0) {
                 if (appPage_select == 0) {
-
                     void StartKhiCAS();
                     StartKhiCAS();
+                } else if (appPage_select == 1) {
+                    void StartEmu48();
+                    StartEmu48();
                 }
             } else if (curPage == 1) {
                 goto CONSOLE_KEY_EVENT;
@@ -1095,22 +1101,22 @@ void getSuffix(TCHAR *ret, TCHAR *filename) {
 
 void UI_Task(void *) {
 
-    // 初始化配置系统
+    // Initialize configuration system
     config_init();
 
     uidisp = new UI_Display(LCD_PIX_W, LCD_PIX_H, ll_disp_put_area);
     mainw = new UI_Window(NULL, NULL, MAIN_WIN_TITLE, uidisp, 0, 0, LCD_PIX_W, LCD_PIX_H);
 
-    // 先初始化文件系统
+    // Initialize filesystem first
     checkFS();
     
-    // 然后加载配置文件
+    // Load configuration file
     config_load();
 
-    // 使用配置系统中的语言设置
+    // Apply language setting from configuration system
     UI_SetLang(config_get_language());
     
-    // 应用电源模式配置
+    // Apply power save mode configuration
     char power_save_mode = config_get_power_save();
     if (power_save_mode == 'S') {
         ll_cpu_slowdown_enable(1);
@@ -1120,14 +1126,14 @@ void UI_Task(void *) {
         ll_cpu_slowdown_enable(0);
     }
     
-    // 应用充电状态配置
+    // Apply charging state configuration
     if (config_get_enable_charge()) {
         ll_charge_enable(true);
     } else {
         ll_charge_enable(false);
     }
     
-    // 应用内存交换配置
+    // Apply memory swap configuration
     if (config_get_enable_mem_swap()) {
         enableMemSwap(true);
     }
@@ -1232,7 +1238,7 @@ void UI_keyScanner(void *_) {
                 drawPage(curPage);
                 UIForceRefresh = false;
                 
-                // 在界面刷新时保存配置
+                // Save configuration on UI refresh
                 config_save();
             }
         }

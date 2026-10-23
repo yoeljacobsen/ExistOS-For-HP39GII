@@ -1,48 +1,47 @@
-// Coding: GBK
+// Coding: UTF-8
+// Legacy Chinese language macros mapped to English
 
 #pragma once
 
-#define TEST_STRING_CN               "我能吞下玻璃而不伤身体"
+#include "UI_English.h"
 
-#define MAIN_WIN_TITLE_CN            "Exist OS"
-#define MAIN_WIN_FKEY_BAR_CN         "应用|终端| | |文件|设置|"
-#define MAIN_WIN_FKEY_BAR2_CN        "应用|终端|<|>|文件|设置|"
-#define MAIN_WIN_FKEY_BARFILE_CN "应用|终端|||删除|设置|"
+#define TEST_STRING_CN               TEST_STRING_EN
 
-#define UI_Yes_CN "是"
-#define UI_No_CN "否"
+#define MAIN_WIN_TITLE_CN            MAIN_WIN_TITLE_EN
+#define MAIN_WIN_FKEY_BAR_CN         MAIN_WIN_FKEY_BAR_EN
+#define MAIN_WIN_FKEY_BAR2_CN        MAIN_WIN_FKEY_BAR2_EN
+#define MAIN_WIN_FKEY_BARFILE_CN     MAIN_WIN_FKEY_BARFILE_EN
 
-#define UI_TEMPERRATURE_CN           "温度"
-#define UI_MEMUSED_CN                "内存使用"
-#define UI_BATTERY_CN                "电池电压"
-#define UI_CHARGING_CN               "充电中"
-#define UI_TIME_CN                   "时间"
+#define UI_Yes_CN                    UI_Yes_EN
+#define UI_No_CN                     UI_No_EN
 
-#define UI_Power_Save_Mode_CN        "省电模式"
-#define UI_Enable_Charge_CN          "开启充电"
+#define UI_TEMPERRATURE_CN           UI_TEMPERRATURE_EN
+#define UI_MEMUSED_CN                UI_MEMUSED_EN
+#define UI_BATTERY_CN                UI_BATTERY_EN
+#define UI_CHARGING_CN               UI_CHARGING_EN
+#define UI_TIME_CN                   UI_TIME_EN
 
-#define UI_FS_init1                  "文件系统未初始化"
-#define UI_FS_init2                  "按下[F2]键进行格式化"
-#define UI_FS_init3                  "正在进行格式化..."
+#define UI_Power_Save_Mode_CN        UI_Power_Save_Mode_EN
+#define UI_Enable_Charge_CN          UI_Enable_Charge_EN
 
-#define UI_LANGUAGE_CN               "语言"
-#define UI_LANGUAGE_CHINESE_CN       "中文"
+#define UI_FS_init1                  "Filesystem not initialized"
+#define UI_FS_init2                  "Press [F2] to format"
+#define UI_FS_init3                  "Formatting..."
 
+#define UI_LANGUAGE_CN               UI_LANGUAGE_EN
+#define UI_LANGUAGE_CHINESE_CN       "EN"
 
-#define UI_Hours_CN                  "时"
-#define UI_Minutes_CN                "分"
-#define UI_Seconds_CN                "秒"
+#define UI_Hours_CN                  UI_Hours_EN
+#define UI_Minutes_CN                UI_Minutes_EN
+#define UI_Seconds_CN                UI_Seconds_EN
 
+#define UI_Storage_Space_CN          UI_Storage_Space_EN
+#define UI_ONF5Format_CN             UI_ONF5Format_EN
 
-#define UI_Storage_Space_CN          "存储空间"
-#define UI_ONF5Format_CN             "[ON]+[F5]打开格式化菜单"
+#define UI_Allocate_Mem_CN           UI_Allocate_Mem_EN
+#define UI_PhyMem_CN                 UI_PhyMem_EN
+#define UI_Compression_rate_CN       UI_Compression_rate_EN
 
-
-
-#define UI_Allocate_Mem_CN          "已分配系统内存"
-#define UI_PhyMem_CN                "已分配压缩内存"
-#define UI_Compression_rate_CN      "压缩率"
-
-#define UI_SRAM_Heap_Pre_Allocated_CN "SRAM堆预分配内存"
-#define UI_Swap_Heap_Pre_Allocated_CN "交换堆预分配内存"
-#define UI_Enable_Mem_Swap_CN "启用虚拟内存"
+#define UI_SRAM_Heap_Pre_Allocated_CN UI_SRAM_Heap_Pre_Allocated_EN
+#define UI_Swap_Heap_Pre_Allocated_CN UI_Swap_Heap_Pre_Allocated_EN
+#define UI_Enable_Mem_Swap_CN        UI_Enable_Mem_Swap_EN

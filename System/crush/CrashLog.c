@@ -12,35 +12,35 @@
     #include "filesystem/littlefs/lfs.h"
 #endif
 
-// 崩溃日志存储区域
+// Crash log storage constants
 #define CRASH_LOG_MAX_COUNT 10
 #define CRASH_LOG_FILE_PREFIX "crash_"
 #define CRASH_LOG_FILE_EXTENSION ".log"
 #define CRASH_LOG_DIR "/crash"
 
-// 崩溃日志存储缓冲区
+// Crash log storage buffer
 static crash_log_t crash_logs[CRASH_LOG_MAX_COUNT];
 static int crash_log_count = 0;
 static bool crash_log_initialized = false;
 
-// 获取当前时间戳
+// Get current timestamp in seconds
 static uint32_t get_timestamp(void) {
-    // 这里应该从RTC获取实际时间，暂时使用系统运行时间
+    // Use system uptime (converted from ms to seconds)
     extern uint32_t ll_get_time_ms(void);
-    return ll_get_time_ms() / 1000; // 转换为秒
+    return ll_get_time_ms() / 1000;
 }
 
-// 初始化崩溃日志系统
+// Initialize crash log system
 void crash_log_init(void) {
     if (crash_log_initialized) {
         return;
     }
     
-    // 清空崩溃日志缓冲区
+    // Clear crash log buffer
     memset(crash_logs, 0, sizeof(crash_logs));
     crash_log_count = 0;
     
-    // 创建crash目录
+    // Create crash directory
 #if FS_TYPE == FS_FATFS
     FRESULT res;
     res = f_mkdir(CRASH_LOG_DIR);
@@ -48,7 +48,7 @@ void crash_log_init(void) {
         printf("Failed to create crash directory: %d\n", res);
     }
 #else
-    // LittleFS 目录创建
+    // LittleFS directory creation
     lfs_t* lfs = (lfs_t*)GetFsObj();
     int err = lfs_mkdir(lfs, CRASH_LOG_DIR);
     if (err != LFS_ERR_OK && err != LFS_ERR_EXIST) {
@@ -60,17 +60,17 @@ void crash_log_init(void) {
     printf("Crash log system initialized\n");
 }
 
-// 获取当前栈跟踪
+// Capture current stack trace
 uint32_t crash_log_get_stack_trace(uint8_t* buffer, uint32_t buffer_size) {
     if (!buffer || buffer_size == 0) {
         return 0;
     }
     
-    // 获取当前栈指针
+    // Get current stack pointer
     uint32_t sp;
     __asm volatile ("mov %0, sp" : "=r" (sp));
     
-    // 复制栈数据
+    // Copy stack data
     uint32_t stack_size = buffer_size;
     if (stack_size > 256) {
         stack_size = 256;
@@ -80,23 +80,22 @@ uint32_t crash_log_get_stack_trace(uint8_t* buffer, uint32_t buffer_size) {
     return stack_size;
 }
 
-// 记录崩溃日志
+// Save crash log entry
 void crash_log_save(crash_type_t type, const char* file, int line, const char* description, 
                    uint32_t pc, uint32_t lr, uint32_t sp, uint32_t psr, const char* task_name) {
     if (!crash_log_initialized) {
         crash_log_init();
     }
     
-    // 如果日志已满，删除最旧的日志
+    // If log buffer is full, drop the oldest entry
     if (crash_log_count >= CRASH_LOG_MAX_COUNT) {
-        // 移动所有日志，删除最旧的
         for (int i = 0; i < CRASH_LOG_MAX_COUNT - 1; i++) {
             memcpy(&crash_logs[i], &crash_logs[i + 1], sizeof(crash_log_t));
         }
         crash_log_count--;
     }
     
-    // 填充新的崩溃日志
+    // Populate new crash log entry
     crash_log_t* log = &crash_logs[crash_log_count];
     memset(log, 0, sizeof(crash_log_t));
     
@@ -123,10 +122,10 @@ void crash_log_save(crash_type_t type, const char* file, int line, const char* d
         log->task_name[sizeof(log->task_name) - 1] = '\0';
     }
     
-    // 获取栈跟踪
+    // Capture stack trace
     log->stack_trace_size = crash_log_get_stack_trace(log->stack_trace, sizeof(log->stack_trace));
     
-    // 创建崩溃日志文件
+    // Write crash log file
     crash_log_create_file(log);
     
     crash_log_count++;
@@ -134,7 +133,7 @@ void crash_log_save(crash_type_t type, const char* file, int line, const char* d
     printf("Crash log saved: %s\n", description);
 }
 
-// 创建崩溃日志文件
+// Create crash log file on filesystem
 bool crash_log_create_file(const crash_log_t* log) {
     if (!log || !crash_log_initialized) {
         return false;
@@ -152,11 +151,11 @@ bool crash_log_create_file(const crash_log_t* log) {
         return false;
     }
     
-    // 写入崩溃日志内容
+    // Write crash log contents
     char buffer[512];
     UINT bytes_written;
     
-    // 写入头部信息
+    // Write header information
     snprintf(buffer, sizeof(buffer), 
              "=== ExistOS Crash Log ===\n"
              "Timestamp: %lu\n"
@@ -175,7 +174,7 @@ bool crash_log_create_file(const crash_log_t* log) {
     
     f_write(&file, buffer, strlen(buffer), &bytes_written);
     
-    // 写入栈跟踪数据（十六进制格式）
+    // Write stack trace data in hex format
     if (log->stack_trace_size > 0) {
         f_write(&file, "Stack Trace:\n", 13, &bytes_written);
         
@@ -203,10 +202,10 @@ bool crash_log_create_file(const crash_log_t* log) {
         return false;
     }
     
-    // 写入崩溃日志内容
+    // Write crash log contents
     char buffer[512];
     
-    // 写入头部信息
+    // Write header information
     snprintf(buffer, sizeof(buffer), 
              "=== ExistOS Crash Log ===\n"
              "Timestamp: %lu\n"
@@ -225,7 +224,7 @@ bool crash_log_create_file(const crash_log_t* log) {
     
     lfs_file_write(lfs, &file, buffer, strlen(buffer));
     
-    // 写入栈跟踪数据（十六进制格式）
+    // Write stack trace data in hex format
     if (log->stack_trace_size > 0) {
         lfs_file_write(lfs, &file, "Stack Trace:\n", 13);
         
@@ -249,12 +248,12 @@ bool crash_log_create_file(const crash_log_t* log) {
     return true;
 }
 
-// 获取崩溃日志数量
+// Get number of recorded crash logs
 int crash_log_get_count(void) {
     return crash_log_count;
 }
 
-// 获取崩溃日志
+// Get crash log by index
 bool crash_log_get(int index, crash_log_t* log) {
     if (!log || index < 0 || index >= crash_log_count) {
         return false;
@@ -264,12 +263,12 @@ bool crash_log_get(int index, crash_log_t* log) {
     return true;
 }
 
-// 清除所有崩溃日志
+// Clear all crash logs
 void crash_log_clear_all(void) {
     crash_log_count = 0;
     memset(crash_logs, 0, sizeof(crash_logs));
     
-    // 删除所有崩溃日志文件
+    // Delete all crash log files
 #if FS_TYPE == FS_FATFS
     DIR dir;
     FILINFO fno;
@@ -313,18 +312,18 @@ void crash_log_clear_all(void) {
     printf("All crash logs cleared\n");
 }
 
-// 系统崩溃处理函数
+// System crash handler
 void crash_handler(crash_type_t type, const char* file, int line, const char* description, ...) {
-    // 获取当前寄存器值
+    // Capture current CPU registers
     uint32_t pc, lr, sp, psr;
     
     __asm volatile ("mov %0, pc" : "=r" (pc));
     __asm volatile ("mov %0, lr" : "=r" (lr));
     __asm volatile ("mov %0, sp" : "=r" (sp));
-    // ARM926EJ-S 不支持 PSR 寄存器，设为0
+    // PSR is not directly read here in user mode; set to 0
     psr = 0;
     
-    // 获取当前任务名称
+    // Get current FreeRTOS task name
     char task_name[16] = "Unknown";
     extern TaskHandle_t xTaskGetCurrentTaskHandle(void);
     TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
@@ -337,7 +336,7 @@ void crash_handler(crash_type_t type, const char* file, int line, const char* de
         }
     }
     
-    // 格式化描述信息
+    // Format crash description
     char formatted_desc[128];
     if (description) {
         va_list args;
@@ -348,10 +347,10 @@ void crash_handler(crash_type_t type, const char* file, int line, const char* de
         formatted_desc[0] = '\0';
     }
     
-    // 保存崩溃日志
+    // Save crash log
     crash_log_save(type, file, line, formatted_desc, pc, lr, sp, psr, task_name);
     
-    // 打印崩溃信息
+    // Print crash details
     printf("\n\n=== SYSTEM CRASH ===\n");
     printf("Type: %d\n", type);
     printf("Description: %s\n", formatted_desc);
@@ -363,10 +362,8 @@ void crash_handler(crash_type_t type, const char* file, int line, const char* de
     printf("PSR: 0x%08lX\n", psr);
     printf("===================\n\n");
     
-    // 系统挂起
+    // Halt system
     while (1) {
-        // 系统崩溃后挂起
-        // ARM926EJ-S 不支持 WFI 指令，使用空循环
         ;
     }
 }
