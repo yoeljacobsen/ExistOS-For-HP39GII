@@ -94,7 +94,7 @@
 #define PAGES_SWAPFILE      (SIZE_SWAPFILE_MB * 1048576 / PAGE_SIZE)
 
 #define VM_ROM_BASE             (0x00100000)
-#define VM_ROM_SIZE             (1048576 * 6)
+#define VM_ROM_SIZE             (1048576 * 9)
 #define VM_ROM_SEG              (VM_ROM_BASE >> 20)
 #define VM_ROM_NUM_SEG          (VM_ROM_SIZE / SEG_SIZE)
 
@@ -104,7 +104,7 @@
 #define VM_RAM_NUM_SEG          (VM_RAM_SIZE / SEG_SIZE)
 
 #define VM_SYS_ROM_BASE         (0x03000000)
-#define VM_SYS_ROM_SIZE         (1048576 * 4)
+#define VM_SYS_ROM_SIZE         (1048576 * 1)
 #define VM_SYS_ROM_SEG          (VM_SYS_ROM_BASE >> 20)
 #define VM_SYS_ROM_NUM_SEG      (VM_SYS_ROM_SIZE / SEG_SIZE)
 

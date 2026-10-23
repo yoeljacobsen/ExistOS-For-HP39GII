@@ -325,7 +325,9 @@ void VM_Unconscious(TaskHandle_t task, char *res, uint32_t address) {
         vTaskSuspend(pLLAPITask);
         LLIRQ_enable(false);
 
-        uint32_t *pRegFram = (uint32_t *)(((uint32_t *)pSysTask)[1]);
+        // Dump the frame of the task that actually faulted, not unconditionally pSysTask.
+        TaskHandle_t faultTask = (task != NULL) ? task : pSysTask;
+        uint32_t *pRegFram = (uint32_t *)(((uint32_t *)faultTask)[1]);
         pRegFram -= 16;
 
         DisplayClean();
@@ -511,7 +513,7 @@ void parseCDCCommand(char *cmd) {
     }
 }
 
-uint32_t g_CDC_TransTo = 100;
+uint32_t g_CDC_TransTo = CDC_PATH_LOADER; // default: OSLoader log (incl. fault dumps) over USB CDC
 // Invoked when cdc when line state changed e.g connected/disconnected
 void tud_cdc_line_state_cb(uint8_t itf, bool dtr, bool rts) {
     (void)itf;
@@ -941,7 +943,10 @@ void TaskUSBLog(void *_) {
     for (;;) {
 
         int ava;
-        if (g_CDC_TransTo == CDC_PATH_LOADER) {
+        // Drain the kernel log ring in both the loader and the system path, so OSLoader's
+        // own diagnostics (page-fault dumps in particular) always reach the USB console.
+        // SCRCAP is excluded: it streams raw framebuffer bytes over the same endpoint.
+        if (g_CDC_TransTo == CDC_PATH_LOADER || g_CDC_TransTo == CDC_PATH_SYS) {
             ava = tud_cdc_write_available();
             if (ava > 0) {
             retest:
@@ -958,7 +963,8 @@ void TaskUSBLog(void *_) {
 
                 } else if (log_j > log_i) {
                     if (SYS_LOG_BUFSIZE - log_j <= ava) {
-                        tud_cdc_write(&log_buf[log_j], SYS_LOG_BUFSIZE - log_j + 1);
+                        // "+ 1" read one byte past the end of the ring.
+                        tud_cdc_write(&log_buf[log_j], SYS_LOG_BUFSIZE - log_j);
                         tud_cdc_write_flush();
                         log_j = 0;
                     } else {

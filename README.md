@@ -17,6 +17,7 @@ ExistOS replaces the proprietary HP 39gII firmware with a modern two-stage opera
 - **[FatFs](http://elm-chan.org/fsw/ff/00index_e.html)** (FAT16 filesystem on internal NAND Flash)
 - **[KhiCAS / Giac](http://www-fourier.ujf-grenoble.fr/~parisse/giac.html)** (Computer Algebra System with Xcas and Python syntax modes)
 - **Emu48** (Saturn CPU emulator capable of running HP 39g / 40g / 48g / 49g calculator ROMs)
+- **[C47](https://gitlab.com/rpncalculators/c43)** (WP43-family RPN scientific calculator, built for ARM by `Libs/src/build_c47.sh`)
 
 ---
 
@@ -34,6 +35,7 @@ ExistOS replaces the proprietary HP 39gII firmware with a modern two-stage opera
 - [x] Graphical User Interface (`UICore`), Console (`SimpShell`), File Manager, and Persistent Settings (`SystemConfig`)
 - [x] KhiCAS Computer Algebra System (`Xcas` & `Python` modes, 2D/polar/field plotting, script editor)
 - [x] Emu48 Saturn Emulator (HP 39g ROM execution, state persistence to `/port0.39g` & `/port2.39g`, clean exit)
+- [x] C47 RPN Scientific Calculator (port of [C47](https://gitlab.com/rpncalculators/c43), the WP43-family DMCP5 firmware, with a 400x240 -> 256x127 anti-aliased display adapter)
 - [x] Native Linux build & deployment toolchain (`elftosb`, `sbloader`, `sysigner`, `edb`)
 
 ---

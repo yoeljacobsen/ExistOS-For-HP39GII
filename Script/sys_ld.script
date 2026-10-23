@@ -1,7 +1,7 @@
 MEMORY
 {
   vmRAM    (rwx) : ORIGIN = 0x02004000, LENGTH = 200K
-  vmROM    (rx ) : ORIGIN = 0x00100000, LENGTH = 6M
+  vmROM    (rx ) : ORIGIN = 0x00100000, LENGTH = 9M
 }
 
 OUTPUT_ARCH(arm)
@@ -55,14 +55,14 @@ SECTIONS
 	. = ALIGN(4);
 	.text :	
 	{
-		*(.text)
+		*(.text .text.*)
 	} >vmROM
 
 	. = ALIGN(8);
 	.rodata : 
 	{
 		. = ALIGN(4);
-		*(.rodata) 
+		*(.rodata .rodata.*) 
 		fonts_hzk_start = .;
 		INCLUDE "../../fonts/fonts_hzk16s.ld"
 		fonts_hzk_end = .;

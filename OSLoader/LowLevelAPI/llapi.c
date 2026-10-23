@@ -413,11 +413,9 @@ void __attribute__((target("thumb"))) LLAPI_Task_thumb_entry() {
             }
 
             case LL_SWI_PUT_CH: {
+                // putchar() already queues into the log ring that TaskUSBLog drains to
+                // USB CDC; writing the char here as well would duplicate every byte.
                 putchar(currentCall.para0);
-                if ((g_CDC_TransTo == CDC_PATH_SYS)) {
-                    tud_cdc_write_char(currentCall.para0);
-                    tud_cdc_write_flush();
-                }
                 break;
             }
 

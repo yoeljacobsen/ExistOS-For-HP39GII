@@ -43,6 +43,7 @@ extern "C" {
 
 extern const unsigned char gImage_khicas_ico[48 * 48];
 extern const unsigned char gImage_emu48_ico[48 * 48];
+extern const unsigned char gImage_c47_ico[48 * 48];
 
 // Use configuration system instead of static variables
 // static char power_save = ' ';
@@ -304,6 +305,10 @@ void drawPage(int page) {
         uidisp->draw_bmp((char *)gImage_emu48_ico, mainw->content_x0 + 92, mainw->content_y0 + 12, 48, 48);
         uidisp->draw_printf(mainw->content_x0 + 96,
                             mainw->content_y0 + 12 + 48 + 1, 16, 0, 0xFF, "Emu48");
+
+        uidisp->draw_bmp((char *)gImage_c47_ico, mainw->content_x0 + 172, mainw->content_y0 + 12, 48, 48);
+        uidisp->draw_printf(mainw->content_x0 + 184,
+                            mainw->content_y0 + 12 + 48 + 1, 16, 0, 0xFF, "C47");
 
         uidisp->draw_box((mainw->content_x0 + 12) + appPage_select * 80,
                          mainw->content_y0 + 12,
@@ -652,7 +657,7 @@ void keyMsg(uint32_t key, int state) {
                 goto CONSOLE_KEY_EVENT;
             }
             if (curPage == 0) {
-                if (appPage_select < 1) {
+                if (appPage_select < 2) {
                     appPage_select++;
                     drawPage(curPage);
                 }
@@ -703,6 +708,9 @@ void keyMsg(uint32_t key, int state) {
                 } else if (appPage_select == 1) {
                     void StartEmu48();
                     StartEmu48();
+                } else if (appPage_select == 2) {
+                    void StartC47();
+                    StartC47();
                 }
             } else if (curPage == 1) {
                 goto CONSOLE_KEY_EVENT;

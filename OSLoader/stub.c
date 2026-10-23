@@ -181,7 +181,9 @@ _ssize_t _write_r(struct _reent *pReent, int fd, const void *buf, size_t nbytes)
         int k = 0;
         while (k < nbytes) {
             log_buf[log_i++] = ((char *)buf)[k++];
-            if (log_i > SYS_LOG_BUFSIZE) {
+            if (log_i >= SYS_LOG_BUFSIZE) {
+                // ">" wrapped one byte late, so the next store landed on
+                // log_buf[SYS_LOG_BUFSIZE] - one past the end of the ring.
                 log_i = 0;
             }
         }

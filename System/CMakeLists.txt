@@ -45,6 +45,7 @@ list(APPEND SYS_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/core/getentropy.c)
 #add_subdirectory(KLib)
 add_subdirectory(KLib/tjpgdec)
 add_subdirectory(emu48)
+add_subdirectory(c47)
 add_subdirectory(applications/user/khicas)
 
 add_executable(sys.elf ${SYS_SRCS})
@@ -80,6 +81,8 @@ target_link_libraries(sys.elf -lm -lc -lrdimon -lgcc -lstdc++ -nostartfiles
 tjpgd
 #gb 
 emu48
+c47
+${CMAKE_SOURCE_DIR}/Libs/libc47_core.libc
 #lvgl
 ${CMAKE_SOURCE_DIR}/Libs/libkcasgui.libcpp
 #${CMAKE_SOURCE_DIR}/Libs/libmpy.libc

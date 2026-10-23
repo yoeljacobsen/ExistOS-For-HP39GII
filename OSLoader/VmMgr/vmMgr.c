@@ -169,6 +169,10 @@ static void taskAccessFaultAddr(pageFaultInfo_t *info, char *res) {
     for (int i = 0; i < 16; i++) {
         VM_ERR("SAVED REGS[%d]:%08lx\n", i, regs[i]);
     }
+    // Let TaskUSBLog (200 ms poll) push the dump above out over USB CDC before the
+    // panic screen suspends the services the log path depends on.
+    vTaskDelay(pdMS_TO_TICKS(600));
+
     switch (info->FSR) {
     case FSR_UNKNOWN:
         VM_Unconscious(info->FaultTask, "[UNK]", info->FaultMemAddr);
