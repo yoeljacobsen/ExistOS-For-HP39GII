@@ -16,6 +16,7 @@
 #include "keyboard_up.h"
 #include "llapi.h"
 #include "llapi_code.h"
+#include "regsrtc.h"
 #include "mtd_up.h"
 #include "rtc_up.h"
 #include "vmMgr.h"
@@ -505,6 +506,7 @@ void parseCDCCommand(char *cmd) {
         tud_disconnect();
         DisplayClean();
         DisplayPutStr(0, 0, "USB MSC Mode.", 0, 255, 16);
+        DisplayPutStr(0, 20, "Press [ON]+[Views] to exit", 0, 255, 16);
         vTaskDelay(pdMS_TO_TICKS(200));
         g_MSC_Configuration = MSC_CONF_SYS_DATA;
         vTaskDelay(pdMS_TO_TICKS(10));
@@ -562,6 +564,7 @@ void tud_cdc_line_state_cb(uint8_t itf, bool dtr, bool rts) {
     }
 }
 
+volatile bool g_req_poweroff = false;
 char cdc_path_loader_buffer[64];
 // Invoked when CDC interface received data from host
 void tud_cdc_rx_cb(uint8_t itf) {
@@ -575,7 +578,7 @@ void tud_cdc_rx_cb(uint8_t itf) {
         }
     }
 
-    if (g_CDC_TransTo == CDC_PATH_LOADER) {
+    if (g_CDC_TransTo == CDC_PATH_LOADER || g_CDC_TransTo == CDC_PATH_SYS) {
         nRead = tud_cdc_available();
         if (nRead < sizeof(cdc_path_loader_buffer)) {
             tud_cdc_read(cdc_path_loader_buffer, sizeof(cdc_path_loader_buffer));
@@ -588,13 +591,42 @@ void tud_cdc_rx_cb(uint8_t itf) {
             }
 
             if (strcmp(cdc_path_loader_buffer, "poweroff") == 0) {
-                portBoardPowerOff();
+                // Deferred: this callback runs inside tud_task(), and portBoardPowerOff()
+                // yields, which would stall USB and swallow its own diagnostic.
+                g_req_poweroff = true;
                 goto fin;
             }
 
             if (strcmp(cdc_path_loader_buffer, "clearall") == 0) {
                 FTL_ClearAllSector();
                 printf("clear all sector.\n");
+                goto fin;
+            }
+
+            if (strcmp(cdc_path_loader_buffer, "pwrinfo") == 0) {
+                // Everything that decides whether a power-down sticks. PERSISTENT0 is
+                // in the always-on RTC domain and survives power cycles, so its
+                // AUTO_RESTART bit is readable evidence rather than an assumption.
+                printf("PWRINFO: sts=%08lx ctrl=%08lx reset=%08lx 5vctrl=%08lx\n",
+                       (unsigned long)HW_POWER_STS.U,
+                       (unsigned long)HW_POWER_CTRL.U,
+                       (unsigned long)HW_POWER_RESET.U,
+                       (unsigned long)HW_POWER_5VCTRL.U);
+                printf("PWRINFO: persistent0=%08lx auto_restart=%d disable_pswitch=%d\n",
+                       (unsigned long)HW_RTC_PERSISTENT0.U,
+                       (int)HW_RTC_PERSISTENT0.B.AUTO_RESTART,
+                       (int)HW_RTC_PERSISTENT0.B.DISABLE_PSWITCH);
+                printf("PWRINFO: battmon=%08lx minpwr=%08lx charge=%08lx vddioctrl=%08lx\n",
+                       (unsigned long)HW_POWER_BATTMONITOR.U,
+                       (unsigned long)HW_POWER_MINPWR.U,
+                       (unsigned long)HW_POWER_CHARGE.U,
+                       (unsigned long)HW_POWER_VDDIOCTRL.U);
+                printf("PWRINFO: alarm_en=%d alarm_wake_en=%d alarm_wake=%d pswitch=%d vdd5v=%d\n",
+                       (int)HW_RTC_PERSISTENT0.B.ALARM_EN,
+                       (int)HW_RTC_PERSISTENT0.B.ALARM_WAKE_EN,
+                       (int)HW_RTC_PERSISTENT0.B.ALARM_WAKE,
+                       (int)HW_POWER_STS.B.PSWITCH,
+                       (int)HW_POWER_STS.B.VDD5V_GT_VDDIO);
                 goto fin;
             }
         }
@@ -821,6 +853,22 @@ int __attribute__((target("thumb"))) capt_ON_Key(int ck, int cp) {
         return 1;
     }
 
+    if ((ck == KEY_VIEWS) && cp) { // [ON] + [Views]: leave the data MSC mode entered
+                                   // at runtime by "MSCDATA" (edb -m), which otherwise
+                                   // has no exit and hides the EDB control disk.
+        if (g_MSC_Configuration == MSC_CONF_SYS_DATA) {
+            FTL_Sync();
+            tud_disconnect();
+            DisplayClean();
+            DisplayPutStr(0, 0, "Leaving USB MSC Mode.", 0, 255, 16);
+            vTaskDelay(pdMS_TO_TICKS(200));
+            g_MSC_Configuration = MSC_CONF_OSLOADER_EDB;
+            vTaskDelay(pdMS_TO_TICKS(10));
+            tud_connect();
+        }
+        return 1;
+    }
+
     if ((ck == KEY_F2) && cp) {
         if (g_CDC_TransTo == CDC_PATH_SCRCAP) {
             // tud_cdc_write_clear();
@@ -870,6 +918,11 @@ void vBatteryMon(void *__n) {
     uint32_t show_bat_val;
 
     for (;;) {
+
+        if (g_req_poweroff) {
+            g_req_poweroff = false;
+            portBoardPowerOff();
+        }
 
         vatt_adc = portLRADCConvCh(7, 5);
         batt_voltage = portGetBatterVoltage_mv();

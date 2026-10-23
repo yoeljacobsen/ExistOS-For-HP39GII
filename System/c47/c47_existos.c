@@ -243,7 +243,7 @@ static void c47_render_help_strip(uint8_t *strip, int sy0, int sh) {
         strip_draw_str5x8(strip, sy0, sh, 4,  74, ",       x<>y          (-)    +/- (CHS)",  C47_INK, C47_PANEL);
         strip_draw_str5x8(strip, sy0, sh, 4,  84, "(       EEX           )      R/S",        C47_INK, C47_PANEL);
         strip_draw_str5x8(strip, sy0, sh, 4,  94, "SHIFT   f, then g     BKSP   backspace",  C47_INK, C47_PANEL);
-        strip_draw_str5x8(strip, sy0, sh, 4, 104, "ON/C    EXIT          ON+F3  quit & save",C47_INK, C47_PANEL);
+        strip_draw_str5x8(strip, sy0, sh, 4, 104, "ON/C    EXIT      SHIFT+ON  quit & save", C47_INK, C47_PANEL);
         strip_draw_str5x8(strip, sy0, sh, 4, 116, "Digits, . and + - x / are direct.",       C47_INK, C47_PANEL);
     } else {
         strip_draw_str5x8(strip, sy0, sh, 4,   2, "C47 KEYMAP (2/2)           [APPS] close", C47_BAR_TXT, C47_BAR);
@@ -257,7 +257,7 @@ static void c47_render_help_strip(uint8_t *strip, int sy0, int sh) {
         strip_draw_str5x8(strip, sy0, sh, 4,  86, " SHIFT+7 LIST (STAT)  others: CATALOG",   C47_INK, C47_PANEL);
         strip_draw_str5x8(strip, sy0, sh, 4,  98, "UP/DOWN stack & menus  LEFT x<>y",        C47_INK, C47_PANEL);
         strip_draw_str5x8(strip, sy0, sh, 4, 108, "RIGHT Rv   VIEWS cycles display mode",    C47_INK, C47_PANEL);
-        strip_draw_str5x8(strip, sy0, sh, 4, 118, "1:1 mode: hold ON + arrows to pan",       C47_INK, C47_PANEL);
+        strip_draw_str5x8(strip, sy0, sh, 4, 118, "In 1:1 mode the arrows pan the view.",    C47_INK, C47_PANEL);
     }
 }
 
@@ -597,7 +597,6 @@ static int c47_key_q_tail = 0;
 
 static uint32_t c47_last_raw_keys = 0;
 static bool     c47_on_held       = false;
-static bool     c47_on_combo_used = false;
 static int      c47_active_c47_key = 0;
 
 static void c47_q_push(int k) {
@@ -692,26 +691,28 @@ static void c47_poll_hardware_keys(void) {
     uint32_t kpress = (keys >> 16) & 0xFFFFu;
 
     if (kpress) {
-        // Key Press event
+        // Key Press event.
+        //
+        // ON + <key> combinations are unreachable here: OSLoader's key_task_capt()
+        // state machine stops publishing key_status as soon as ON goes down and hands
+        // the combination to capt_ON_Key() instead, which owns ON+F2/F3/F5/F6 and
+        // ON+/- globally. ON+F3 there is portBoardPowerOff(). So the port must not
+        // claim any ON+key chord; a plain ON tap is still delivered and means EXIT.
         if (key == K39_ON) {
             c47_on_held = true;
-            c47_on_combo_used = false;
             return;
         }
 
-        // Handle ON + key combinations
-        if (c47_on_held) {
-            c47_on_combo_used = true;
-            if (key == K39_F3) {
-                // ON + F3: Exit C47 and auto-save state
-                c47_help_page = 0;
-                backToDMCP = 1;
-                return;
+        // 1:1 pan mode owns the arrows while it is showing, since panning is the whole
+        // point of that mode; switch back with VIEWS to give C47 its arrows again.
+        if (c47_disp_mode == 2 && c47_help_page == 0) {
+            switch (key) {
+                case K39_LEFT:  c47_pan_x -= 36; if (c47_pan_x < 0) c47_pan_x = 0; c47_flush_screen(); return;
+                case K39_RIGHT: c47_pan_x += 36; if (c47_pan_x > LCD_X - LCD_PIX_W) c47_pan_x = LCD_X - LCD_PIX_W; c47_flush_screen(); return;
+                case K39_UP:    c47_pan_y -= 28; if (c47_pan_y < 0) c47_pan_y = 0; c47_flush_screen(); return;
+                case K39_DOWN:  c47_pan_y += 28; if (c47_pan_y > LCD_Y - LCD_PIX_H) c47_pan_y = LCD_Y - LCD_PIX_H; c47_flush_screen(); return;
+                default: break;
             }
-            if (key == K39_LEFT)  { c47_pan_x -= 36; if (c47_pan_x < 0) c47_pan_x = 0; c47_flush_screen(); return; }
-            if (key == K39_RIGHT) { c47_pan_x += 36; if (c47_pan_x > LCD_X - LCD_PIX_W) c47_pan_x = LCD_X - LCD_PIX_W; c47_flush_screen(); return; }
-            if (key == K39_UP)    { c47_pan_y -= 28; if (c47_pan_y < 0) c47_pan_y = 0; c47_flush_screen(); return; }
-            if (key == K39_DOWN)  { c47_pan_y += 28; if (c47_pan_y > LCD_Y - LCD_PIX_H) c47_pan_y = LCD_Y - LCD_PIX_H; c47_flush_screen(); return; }
         }
 
         // APPS key: toggle 2-page on-screen keymap reference overlay
@@ -802,13 +803,13 @@ static void c47_poll_hardware_keys(void) {
     } else {
         // Key Release event
         if (key == K39_ON) {
-            if (c47_on_held && !c47_on_combo_used) {
-                // Short press & release of ON/C -> tap C47 KEY_EXIT (33)
+            if (c47_on_held) {
+                // Release of ON/C -> tap C47 KEY_EXIT (33). With f pending this is
+                // C47's OFF, which is how the user quits back to the ExistOS launcher.
                 c47_q_push(33);
                 c47_q_push(0);
             }
             c47_on_held = false;
-            c47_on_combo_used = false;
             return;
         }
         if (c47_active_c47_key != 0) {
@@ -1075,10 +1076,10 @@ int get_vbat(void) {
 }
 
 int usb_powered(void) {
-    // ll_get_charge_status() reports whether OSLoader has the charger enabled, which it
-    // turns off once the pack is full, so this is "charging", not "USB present". It only
-    // drives C47's USB annunciator; get_vbat() above is what keeps it from shutting down.
-    return ll_get_charge_status() ? 1 : 0;
+    // VDD5V_GT_VDDIO, i.e. externally powered. ll_get_charge_status() is not a
+    // substitute: it reports whether OSLoader has the charger enabled, which it
+    // turns off once the pack is full.
+    return ll_get_vdd5v_present() ? 1 : 0;
 }
 
 int power_check_screen(void) {
@@ -1454,7 +1455,6 @@ static void __attribute__((target("arm"))) c47_task(void *arg) {
         clearKeyBuffer();
         c47_last_raw_keys  = ll_vm_check_key();
         c47_on_held        = false;
-        c47_on_combo_used  = false;
         c47_active_c47_key = 0;
         c47_help_page      = 0;
         memset(c47_systim_enabled, 0, sizeof(c47_systim_enabled));

@@ -198,6 +198,7 @@ void emu48_update_display(void)
 
 void __attribute__((target("arm"))) emu48_disp_update_task(void *_)
 {
+    uint32_t diag_ticks = 0;
     if (disp_strip_buf) {
         memset(disp_strip_buf, 255, 256 * DISP_STRIP_SCR_ROWS);
         for (uint16_t sy = 0; sy < 128; sy += DISP_STRIP_SCR_ROWS) {
@@ -233,6 +234,22 @@ void __attribute__((target("arm"))) emu48_disp_update_task(void *_)
             }
             need_Refresh = false;
         }
+        // First few seconds only: is the emulated machine actually running, and has it
+        // turned its LCD on? A black panel with DON clear means UpdateMainDisplay()
+        // zeroed pbyLcd because the Saturn never enabled the display.
+        if (diag_ticks < 200 && (diag_ticks % 20) == 0) {
+            extern BOOL bGrayscale;
+            printf("EMU48: pc=%05lx don=%d shutdn=%d refresh=%d gray=%d boffset=%d d0size=%d\n",
+                   (unsigned long)Chipset.pc,
+                   (int)((Chipset.IORam[BITOFFSET] & DON) ? 1 : 0),
+                   (int)Chipset.Shutdn,
+                   (int)need_Refresh,
+                   (int)bGrayscale,
+                   (int)Chipset.boffset,
+                   (int)Chipset.d0size);
+        }
+        diag_ticks++;
+
         vTaskDelay(pdMS_TO_TICKS(50));
     }
 }
@@ -367,6 +384,8 @@ void emu48_main(int select)
     int on_press = 0;
     uint32_t last_key = 0;
     uint32_t last_press = 0;
+    uint32_t on_down_ms = 0;
+    bool quit_emu = false;
 
     for (;;) {
         uint32_t keys, key, kpress;
@@ -386,9 +405,12 @@ void emu48_main(int select)
             }
         } while ((last_key == key) && (last_press == kpress));
 
-        // Exit Emu48 when ON + F3 (or F3 while ON hold timer active) is pressed
-        if (kpress && key == KEY_F3 && on_press > 0) {
-            KeyboardEvent(false, KEY_39G_ON.out, KEY_39G_ON.in);
+        // The exit used to be ON+F3, which could never fire: OSLoader's key_task_capt()
+        // stops publishing key state as soon as ON goes down and routes the chord to
+        // capt_ON_Key(), where ON+F3 is portBoardPowerOff(). Trying to leave Emu48
+        // powered the calculator down instead. Exit is a long press of ON, handled in
+        // the KEY_ON case below; no ON+<key> chord can work here.
+        if (quit_emu) {
             break;
         }
 
@@ -457,8 +479,20 @@ void emu48_main(int select)
             KEY_CASE(KEY_UP       , KEY_39G_UP      );
 
             case KEY_ON:
-                KeyboardEvent(true, KEY_39G_ON.out, KEY_39G_ON.in);
-                on_press = 15;
+                if (kpress) {
+                    on_down_ms = ll_get_time_ms();
+                    KeyboardEvent(true, KEY_39G_ON.out, KEY_39G_ON.in);
+                    on_press = 15;
+                } else {
+                    KeyboardEvent(false, KEY_39G_ON.out, KEY_39G_ON.in);
+                    on_press = 0;
+                    // Held rather than tapped: quit back to the ExistOS launcher. A tap
+                    // still reaches the emulated machine as its own ON key.
+                    if (on_down_ms != 0 && (ll_get_time_ms() - on_down_ms) > 1200) {
+                        quit_emu = true;
+                    }
+                    on_down_ms = 0;
+                }
                 break;
 
             default:

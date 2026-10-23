@@ -1,3 +1,6 @@
+#include "FreeRTOS.h"
+#include "task.h"
+
 #include "board_up.h"
 #include "regspower.h"
 #include "regslradc.h"
@@ -5,6 +8,7 @@
 #include "hw_irq.h"
 #include "regsrtc.h"
 
+#include "keyboard_up.h"
 #include "../debug.h"
 
 bool g_chargeEnable = false;
@@ -63,17 +67,60 @@ void portPowerIRQ(uint32_t nirq)
 }
 
 
+bool portIsVdd5vPresent()
+{
+    // Set whenever the 5 V rail (USB) is above VDDIO, i.e. the board is externally
+    // powered rather than running from the cells.
+    return HW_POWER_STS.B.VDD5V_GT_VDDIO ? true : false;
+}
+
+
 void portBoardPowerOff()
 {
 
     //HW_POWER_VDDIOCTRL.B.DISABLE_FET = 0;
     //HW_POWER_5VCTRL.B.ENABLE_DCDC = 0;
 
-    BF_WR(POWER_RESET, UNLOCK, 0x3E77);
-    BF_WR(POWER_RESET, PWD_OFF, 1);
-    BF_WR(POWER_RESET, PWD, 1);
+    // Wait for the ON key to be released. ON is also the PMU's PSWITCH, a power-up
+    // source: writing PWD while it is still asserted powers the chip down and the PMU
+    // powers it straight back up, which presents as a reboot rather than a shutdown.
+    // SHIFT+ON reaches here well within the time a key is normally held.
+    for (int i = 0; i < 300 && portIsKeyDown(KEY_ON); i++) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    vTaskDelay(pdMS_TO_TICKS(100)); // let PSWITCH debounce settle after release
 
+    // Make sure nothing is armed to wake us again straight away.
+    while (HW_RTC_STAT.B.NEW_REGS);
+    HW_RTC_PERSISTENT0.B.ALARM_EN = 0;
+    while (HW_RTC_STAT.B.NEW_REGS);
+    HW_RTC_PERSISTENT0.B.ALARM_WAKE_EN = 0;
+    while (HW_RTC_STAT.B.NEW_REGS);
+    HW_RTC_PERSISTENT0.B.AUTO_RESTART = 0;
+    while (HW_RTC_STAT.B.NEW_REGS);
 
+    printf("PWROFF: pswitch=%d vdd5v=%d on=%d sts=%08lx persistent0=%08lx\n",
+           (int)HW_POWER_STS.B.PSWITCH,
+           (int)HW_POWER_STS.B.VDD5V_GT_VDDIO,
+           (int)portIsKeyDown(KEY_ON),
+           (unsigned long)HW_POWER_STS.U,
+           (unsigned long)HW_RTC_PERSISTENT0.U);
+    vTaskDelay(pdMS_TO_TICKS(400)); // TaskUSBLog polls the log ring every 200 ms; let
+                                    // the line out before the rail drops. Must yield:
+                                    // portDelayms() spins and would starve that task.
+
+    // The unlock key must accompany PWD in the same 32-bit write. UNLOCK reads back as
+    // zero (HW_POWER_RESET reads 00000000 while running), so the original three
+    // read-modify-writes of individual fields put UNLOCK=0 into the same word as PWD=1.
+    //
+    // Disabling the 5 V detect comparators here does NOT help: it kills USB without
+    // powering the chip down, leaving it running with a dead USB stack, which looks
+    // like a successful shutdown from the host and like a hang from the keyboard.
+    HW_POWER_RESET_WR(BF_POWER_RESET_UNLOCK(BV_POWER_RESET_UNLOCK__KEY) | BM_POWER_RESET_PWD);
+
+    for (;;) {
+        // Does not return on success.
+    }
 }
 
 
@@ -81,6 +128,15 @@ void portPowerInit()
 {
 
     INFO("PWR Init.\n");
+
+    // Power-up context: distinguishes "we were switched on" from "we powered down and
+    // something immediately powered us back up", and names the source when it is the
+    // latter. Printed every boot so a reboot-after-shutdown leaves evidence.
+    printf("PWRUP: pswitch=%d vdd5v=%d sts=%08lx persistent0=%08lx\n",
+           (int)HW_POWER_STS.B.PSWITCH,
+           (int)HW_POWER_STS.B.VDD5V_GT_VDDIO,
+           (unsigned long)HW_POWER_STS.U,
+           (unsigned long)HW_RTC_PERSISTENT0.U);
 
     BF_CLR(POWER_CTRL, CLKGATE);
 /*

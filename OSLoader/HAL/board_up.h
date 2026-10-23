@@ -29,6 +29,7 @@ uint32_t portBoardGetTime_ms(void);
 uint32_t portBoardGetTime_s(void);
 
 void portBoardPowerOff(void);
+bool portIsVdd5vPresent(void);
 void portBoardReset(void);
 void portLRADCEnable(bool enable ,uint32_t ch);
 void portLRADC_init();

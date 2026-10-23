@@ -24,8 +24,22 @@ void emu48_update_display();
 static DWORD dwGrayMask;
 
 
-//#define DIBPIXEL(d,p) *((DWORD*)(d)) = ((*((DWORD*)(d)) & dwGrayMask ) << 1) | (p); d += 1 //*(((DWORD*)(d))++) = ((*((DWORD*)(d)) & dwGrayMask) << 1) | (p)
-#define DIBPIXEL(d,p) *d = (p); d += 1 //*(((DWORD*)(d))++) = ((*((DWORD*)(d)) & dwGrayMask) << 1) | (p)
+// One Saturn nibble is four horizontal pixels, and Pattern[] packs them as four bytes
+// of one DWORD, least significant byte = leftmost pixel (0 = ink, 255 = paper). The
+// original stored that DWORD through a DWORD pointer and advanced one DWORD; writing
+// it through a BYTE pointer as "*d = p; d += 1" kept only the leftmost pixel of each
+// nibble and advanced a quarter of the way, so a full redraw filled 36 of each row's
+// 144 bytes and left the rest stale. Expand to the four bytes explicitly, which also
+// avoids assuming d is DWORD-aligned.
+#define DIBPIXEL(d,p)                               \
+	do {                                            \
+		DWORD _pat = (p);                           \
+		(d)[0] = (BYTE)( _pat        & 0xFF);       \
+		(d)[1] = (BYTE)((_pat >>  8) & 0xFF);       \
+		(d)[2] = (BYTE)((_pat >> 16) & 0xFF);       \
+		(d)[3] = (BYTE)((_pat >> 24) & 0xFF);       \
+		(d) += 4;                                   \
+	} while (0)
 
 #define GRAYMASK(c)	(((((c)-1)>>1)<<24) \
 					|((((c)-1)>>1)<<16) \
@@ -140,7 +154,7 @@ VOID UpdateMainDisplay(VOID)
 	}
 	EnterCriticalSection(&csGDILock);		// solving NT GDI problems
 	{
-		//emu48_update_display();
+		emu48_update_display();
 
 		 // CdB for HP: add 64/80 ligne display for apples
          /*
@@ -193,7 +207,7 @@ VOID UpdateMenuDisplay(VOID)
 	}
 	EnterCriticalSection(&csGDILock);		// solving NT GDI problems
 	{
-		//emu48_update_display();
+		emu48_update_display();
 		 // CdB for HP: add 64/80 ligne display for apples
          /*
         StretchBlt(hWindowDC, 

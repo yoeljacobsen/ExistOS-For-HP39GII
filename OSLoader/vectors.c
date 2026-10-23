@@ -133,6 +133,10 @@ void volatile arm_do_swi(uint32_t SWINum, uint32_t *pRegFram) {
             pRegFram[0 + 2] = g_chargeEnable;
             break;
 
+        case LL_FAST_SWI_GET_VDD5V_PRESENT:
+            pRegFram[0 + 2] = portIsVdd5vPresent() ? 1 : 0;
+            break;
+
         case LL_FAST_SWI_RTC_GET_SEC:
             pRegFram[0 + 2] = rtc_get_seconds();
             break;

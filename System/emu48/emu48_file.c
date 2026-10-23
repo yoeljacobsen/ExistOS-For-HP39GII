@@ -172,12 +172,45 @@ int load_rom(const char *romfile)
         return -1;
     }
 
+    // Emu48 wants a raw Saturn ROM dump, nothing else. Two checks, because feeding it
+    // anything else does not fail: the Saturn just executes whatever bytes it finds and
+    // never turns its LCD on, leaving a black screen with no clue why.
+
+    // 1. The HP 39g+/39gs flash image (Kinpo) is an ARM firmware with the Saturn ROM
+    //    buried inside it, not a ROM. It is a plausible thing to copy onto the device
+    //    under this name, so name it precisely.
+    if (memcmp(header, "KINPOHP39G+IMAGE", 16) == 0) {
+        printf("Emu48: /rom.39g is an HP 39g+/39gs firmware image, not a Saturn ROM.\n");
+        printf("Emu48: Emu48 needs a raw HP 39G ROM dump.\n");
+        f_close(romf);
+        vPortFree(romf);
+        romf = NULL;
+        rom_size = 0;
+        return -1;
+    }
+
     uint8_t upper_mask = 0;
     for (size_t i = 0; i < sizeof(header); i++) {
         upper_mask |= (header[i] & 0xF0);
     }
     rom_isPacked = (upper_mask != 0);
     rom_nibble_size = rom_isPacked ? (rom_size * 2) : rom_size;
+
+    // 2. RomSwitch() computes bank bases with "& (dwRomSize - 1)" and Map() builds its
+    //    mirroring mask the same way, so the nibble count has to be a power of two or
+    //    every bank lands at a wrong address.
+    if (rom_nibble_size == 0 ||
+        (rom_nibble_size & (rom_nibble_size - 1)) != 0) {
+        printf("Emu48: ROM is %u nibbles, which is not a power of two.\n",
+               (unsigned int)rom_nibble_size);
+        printf("Emu48: bank switching needs a power-of-two ROM; file is not a ROM dump.\n");
+        f_close(romf);
+        vPortFree(romf);
+        romf = NULL;
+        rom_size = 0;
+        rom_nibble_size = 0;
+        return -1;
+    }
 
     rom_cache = pvPortMalloc(sizeof(rom_cache_set_t) * ROM_CACHE_SETS);
     if (!rom_cache) {
@@ -202,6 +235,23 @@ int load_rom(const char *romfile)
            rom_isPacked ? "packed" : "unpacked",
            (unsigned int)rom_size,
            (unsigned int)rom_nibble_size);
+
+    // The packed/unpacked guess above is made from the high nibbles of these 16 bytes,
+    // and everything the Saturn executes depends on getting it right. Print them, plus
+    // the first nibbles as the cache actually serves them, so the two can be compared.
+    printf("Emu48 ROM head:");
+    for (size_t i = 0; i < sizeof(header); i++) {
+        printf(" %02x", header[i]);
+    }
+    printf("\n");
+    {
+        const uint8_t *n = rom_cache_fastptr(0);
+        printf("Emu48 ROM nib0:");
+        for (int i = 0; i < 32; i++) {
+            printf("%x", n[i] & 0x0F);
+        }
+        printf("\n");
+    }
     return 0;
 }
 
