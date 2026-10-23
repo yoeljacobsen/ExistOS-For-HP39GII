@@ -349,6 +349,19 @@ static inline int save_cache_page(CachePageInfo_t *cache_page) {
         // printf("ind:%d\n", (cache_page->onSector * 2048 + cache_page->sectorOffset) / PAGE_SIZE);
         uint32_t ind = (cache_page->onSector * 2048 + cache_page->sectorOffset) / PAGE_SIZE;
         if (ind < (ZRAM_COMPRESSED_SIZE / PAGE_SIZE)) {
+            const uint32_t *words = (const uint32_t *)cache_page->PageOnPhyAddr;
+            uint32_t acc = 0;
+            for (uint32_t w = 0; w < (PAGE_SIZE / sizeof(uint32_t)); w++) {
+                acc |= words[w];
+            }
+            if (acc == 0) {
+                if (ZRAMAddress_Tab[ind]) {
+                    tlsf_free((void *)ZRAMAddress_Tab[ind]);
+                    ZRAMAddress_Tab[ind] = 0;
+                }
+                cache_page->dirty = false;
+                return 0;
+            }
             //
             // memcpy(mem_buffer(ZRAMAddress_Tab[ind]), (void *)cache_page->PageOnPhyAddr, PAGE_SIZE);
             // memset(workbuf_comp, 0, sizeof(workbuf_comp));
@@ -797,7 +810,7 @@ void __attribute__((optimize("-Os"))) vmMgr_task() {
                                 // mem_free(ZRAMAddress_Tab[zram_ind]);
                                 // ZRAMAddress_Tab[zram_ind] = 0;
                             } else {
-                                // printf("new page:%ld\n", zram_ind);
+                                memset((void *)CachePageVRAMCur->PageOnPhyAddr, 0, PAGE_SIZE);
                             }
                         } else {
                             if (mem_swap_enable) {

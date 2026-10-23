@@ -39,39 +39,28 @@ caddr_t _sbrk(uint32_t incr) {
     }
     prev_heap = heap;
 
-    if (cur_heap_loc == 0) {
-        if (((uint32_t)heap + incr) > RAM_BASE + OnChipMemorySize) {
-            if (MemorySwapEnable) {
-                heap = (void *)(RAM_BASE + OnChipMemorySize);
-                cur_heap_loc = 1;
-                prev_heap = heap;
-                heap += incr;
-                ll_put_str("EXT HEAP 2\n");
-                goto success;
-            } else {
-
-                ll_put_str("EXT HEAP NOMEM !\n");
-                errno = ENOMEM;
-                goto fail;
-            }
+    uint32_t max_addr = RAM_BASE + OnChipMemorySize;
+    if (MemorySwapEnable) {
+        if (SwapMemorySize > OnChipMemorySize) {
+            max_addr = RAM_BASE + SwapMemorySize;
         } else {
-            heap += incr;
-        }
-    } else if (cur_heap_loc == 1) {
-
-        if (((uint32_t)heap + incr) > RAM_BASE + OnChipMemorySize + SwapMemorySize) {
-            ll_put_str("SWAP HEAP NOMEM !\n");
-            errno = ENOMEM;
-            goto fail;
-        } else {
-            heap += incr;
+            max_addr = RAM_BASE + OnChipMemorySize + SwapMemorySize;
         }
     }
-success:
-    return (caddr_t)prev_heap;
-fail:
 
-    return (caddr_t)-1;
+    if (((uint32_t)heap + incr) > max_addr) {
+        ll_put_str("EXT HEAP NOMEM !\n");
+        errno = ENOMEM;
+        return (caddr_t)-1;
+    }
+
+    if (cur_heap_loc == 0 && ((uint32_t)heap + incr) > RAM_BASE + OnChipMemorySize) {
+        cur_heap_loc = 1;
+        ll_put_str("EXT HEAP 2\n");
+    }
+
+    heap += incr;
+    return (caddr_t)prev_heap;
 }
 
 size_t getOnChipHeapAllocated() {

@@ -41,11 +41,18 @@ DWORD  dwPort2Mask = 0;
 LARGE_INTEGER    lFreq;						// high performance counter frequency
 LARGE_INTEGER    lAppStart;					// high performance counter value at Appl. start
 
-static uint8_t *full_screen_buf = NULL;
+#define DISP_STRIP_LCD_ROWS 8
+#define DISP_STRIP_SCR_ROWS (DISP_STRIP_LCD_ROWS * 2)
+
+static uint8_t *disp_strip_buf = NULL;
 
 static TaskHandle_t hEmuWorkerTask = NULL;
 static TaskHandle_t hEmuTimerTask  = NULL;
 static TaskHandle_t hEmuDispTask   = NULL;
+
+extern bool MemorySwapEnable;
+extern uint32_t OnChipMemorySize;
+void enableMemSwap(bool enable);
 
 bool rom_is_packed(void);
 int load_rom(const char *romfile);
@@ -54,6 +61,8 @@ int load_port_file(const char *path, void *buf, size_t size);
 int save_port_file(const char *path, const void *buf, size_t size);
 void *get_emu_rom_addr(void);
 size_t get_rom_size(void);
+size_t get_rom_nibble_size(void);
+uint8_t *rom_cache_fastptr(uint32_t nibble_offset);
 
 void __attribute__((target("arm"))) emu_thread(void *_)
 {
@@ -189,26 +198,39 @@ void emu48_update_display(void)
 
 void __attribute__((target("arm"))) emu48_disp_update_task(void *_)
 {
-    if (full_screen_buf) {
-        memset(full_screen_buf, 255, 256 * 128);
+    if (disp_strip_buf) {
+        memset(disp_strip_buf, 255, 256 * DISP_STRIP_SCR_ROWS);
+        for (uint16_t sy = 0; sy < 128; sy += DISP_STRIP_SCR_ROWS) {
+            uint16_t sy_end = sy + DISP_STRIP_SCR_ROWS - 1;
+            if (sy_end > 126) sy_end = 126;
+            ll_disp_put_area(disp_strip_buf, 0, sy, 255, sy_end);
+        }
     }
     for (;;) {
-        if (need_Refresh && pbyLcd && full_screen_buf) {
-            for (uint16_t y = 0; y < SCREENHEIGHT; y++) {
-                uint16_t sy = y * 2;
-                if (sy >= 127) break;
-                for (uint16_t x = 0; x < 131; x++) {
-                    uint16_t sx = (x * 250) / 131;
-                    uint8_t pix = pbyLcd[144 * y + x];
-                    if (sx < 255) {
-                        full_screen_buf[256 * sy + sx] = pix;
-                        full_screen_buf[256 * (sy + 1) + sx] = pix;
-                        full_screen_buf[256 * sy + (sx + 1)] = pix;
-                        full_screen_buf[256 * (sy + 1) + (sx + 1)] = pix;
+        if (need_Refresh && pbyLcd && disp_strip_buf) {
+            for (uint16_t base_y = 0; base_y < SCREENHEIGHT; base_y += DISP_STRIP_LCD_ROWS) {
+                memset(disp_strip_buf, 255, 256 * DISP_STRIP_SCR_ROWS);
+                for (uint16_t dy = 0; dy < DISP_STRIP_LCD_ROWS && (base_y + dy) < SCREENHEIGHT; dy++) {
+                    uint16_t y = base_y + dy;
+                    uint16_t local_sy = dy * 2;
+                    for (uint16_t x = 0; x < 131; x++) {
+                        uint16_t sx = (x * 250) / 131;
+                        uint8_t pix = pbyLcd[144 * y + x];
+                        if (sx < 255) {
+                            disp_strip_buf[256 * local_sy + sx] = pix;
+                            disp_strip_buf[256 * (local_sy + 1) + sx] = pix;
+                            disp_strip_buf[256 * local_sy + (sx + 1)] = pix;
+                            disp_strip_buf[256 * (local_sy + 1) + (sx + 1)] = pix;
+                        }
                     }
                 }
+                uint16_t sy_start = base_y * 2;
+                uint16_t sy_end = sy_start + DISP_STRIP_SCR_ROWS - 1;
+                if (sy_start <= 126) {
+                    if (sy_end > 126) sy_end = 126;
+                    ll_disp_put_area(disp_strip_buf, 0, sy_start, 255, sy_end);
+                }
             }
-            ll_disp_put_area(full_screen_buf, 0, 0, 255, 126);
             need_Refresh = false;
         }
         vTaskDelay(pdMS_TO_TICKS(50));
@@ -218,8 +240,6 @@ void __attribute__((target("arm"))) emu48_disp_update_task(void *_)
 extern void *emu_rom_addr;
 
 static BYTE pbyNULL[16];
-static BYTE pbyCODE_packed[64];
-static BYTE pbyCODE_unpacked[sizeof(pbyCODE_packed) * 2];
 
 LPBYTE FASTPTR(DWORD d)
 {
@@ -234,16 +254,8 @@ LPBYTE FASTPTR(DWORD d)
     {
         lpbyPage += d & 0xFFF;				// full address
 
-        if ((uint32_t)lpbyPage >= 0x70000000) {
-            uint32_t acc_addr = ((uint32_t)lpbyPage - 0x70000000) / 2 + (uint32_t)emu_rom_addr;
-
-            memcpy(pbyCODE_packed, (void *)acc_addr, sizeof(pbyCODE_packed));
-
-            for (int i = 0, j = 0; i < (int)sizeof(pbyCODE_packed); i++) {
-                pbyCODE_unpacked[j++] = pbyCODE_packed[i] & 0xF;
-                pbyCODE_unpacked[j++] = pbyCODE_packed[i] >> 4;
-            }
-            return &pbyCODE_unpacked[(uint32_t)lpbyPage & 1];
+        if ((uint32_t)lpbyPage >= 0x70000000U) {
+            return rom_cache_fastptr((uint32_t)lpbyPage - 0x70000000U);
         } else {
             return lpbyPage;
         }
@@ -256,6 +268,10 @@ LPBYTE FASTPTR(DWORD d)
 
 void emu48_main(int select)
 {
+    if (OnChipMemorySize < 700 * 1024 && !MemorySwapEnable) {
+        enableMemSwap(true);
+    }
+
     int ret = load_rom("/rom.39g");
     if (ret) {
         printf("Failed to open ROM (/rom.39g or /rom.g39): %d\n", ret);
@@ -263,21 +279,21 @@ void emu48_main(int select)
     }
 
     pbyRom = (LPBYTE)0x70000000;
-    dwRomSize = get_rom_size() * 2;
+    dwRomSize = (DWORD)get_rom_nibble_size();
 
     cCurrentRomType = 'E';
     nCurrentClass = 39;
 
     pbyLcd = pvPortMalloc(144 * SCREENHEIGHT);
-    full_screen_buf = pvPortMalloc(256 * 128);
-    if (!pbyLcd || !full_screen_buf) {
+    disp_strip_buf = pvPortMalloc(256 * DISP_STRIP_SCR_ROWS);
+    if (!pbyLcd || !disp_strip_buf) {
         if (pbyLcd) {
             vPortFree(pbyLcd);
             pbyLcd = NULL;
         }
-        if (full_screen_buf) {
-            vPortFree(full_screen_buf);
-            full_screen_buf = NULL;
+        if (disp_strip_buf) {
+            vPortFree(disp_strip_buf);
+            disp_strip_buf = NULL;
         }
         unload_rom();
         return;
@@ -312,16 +328,21 @@ void emu48_main(int select)
     if (Chipset.Port0Size) {
         Chipset.Port0 = HeapAlloc(hHeap, HEAP_ZERO_MEMORY, Chipset.Port0Size * 2048);
         _ASSERT(Chipset.Port0 != NULL);
-        load_port_file("/port0.39g", Chipset.Port0, Chipset.Port0Size * 2048);
+        if (load_port_file("/port0.39g", Chipset.Port0, Chipset.Port0Size * 2048) != 0) {
+            memset(Chipset.Port0, 0, Chipset.Port0Size * 2048);
+        }
     }
     if (Chipset.Port1Size) {
         Chipset.Port1 = HeapAlloc(hHeap, HEAP_ZERO_MEMORY, Chipset.Port1Size * 2048);
         _ASSERT(Chipset.Port1 != NULL);
+        memset(Chipset.Port1, 0, Chipset.Port1Size * 2048);
     }
     if (Chipset.Port2Size) {
         Chipset.Port2 = HeapAlloc(hHeap, HEAP_ZERO_MEMORY, Chipset.Port2Size * 2048);
         _ASSERT(Chipset.Port2 != NULL);
-        load_port_file("/port2.39g", Chipset.Port2, Chipset.Port2Size * 2048);
+        if (load_port_file("/port2.39g", Chipset.Port2, Chipset.Port2Size * 2048) != 0) {
+            memset(Chipset.Port2, 0, Chipset.Port2Size * 2048);
+        }
     }
 
     RomSwitch(0);							// boot ROM view and map memory
@@ -332,9 +353,9 @@ void emu48_main(int select)
     nState     = SM_RUN;					// init state must be <> nNextState
     nNextState = SM_INVALID;				// go into invalid state
 
-    xTaskCreate(emu_thread, "emu48", 4096, NULL, configMAX_PRIORITIES - 3, &hEmuWorkerTask);
-    xTaskCreate(emu_timer_thread, "emu48_tmr", 1000, NULL, configMAX_PRIORITIES - 3, &hEmuTimerTask);
-    xTaskCreate(emu48_disp_update_task, "emu48_disp", 1000, NULL, configMAX_PRIORITIES - 3, &hEmuDispTask);
+    xTaskCreate(emu_thread, "emu48", 2048, NULL, configMAX_PRIORITIES - 3, &hEmuWorkerTask);
+    xTaskCreate(emu_timer_thread, "emu48_tmr", 512, NULL, configMAX_PRIORITIES - 3, &hEmuTimerTask);
+    xTaskCreate(emu48_disp_update_task, "emu48_disp", 512, NULL, configMAX_PRIORITIES - 3, &hEmuDispTask);
 
     ll_cpu_slowdown_enable(false);
 
@@ -484,9 +505,9 @@ void emu48_main(int select)
         vPortFree(pbyLcd);
         pbyLcd = NULL;
     }
-    if (full_screen_buf) {
-        vPortFree(full_screen_buf);
-        full_screen_buf = NULL;
+    if (disp_strip_buf) {
+        vPortFree(disp_strip_buf);
+        disp_strip_buf = NULL;
     }
     unload_rom();
 }
@@ -501,7 +522,7 @@ void __attribute__((target("arm"))) emu48_task(void *_)
 
 void StartEmu48(void)
 {
-    xTaskCreate(emu48_task, "Emu48", 2048, NULL, configMAX_PRIORITIES - 3, NULL);
+    xTaskCreate(emu48_task, "Emu48", 1024, NULL, configMAX_PRIORITIES - 3, NULL);
 }
 
 void EnterCriticalSection(CRITICAL_SECTION *obj)
