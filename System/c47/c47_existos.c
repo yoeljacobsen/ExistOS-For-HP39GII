@@ -251,12 +251,13 @@ static void c47_render_help_strip(uint8_t *strip, int sy0, int sh) {
         strip_draw_str5x8(strip, sy0, sh, 4,  24, "sent as a shifted pair:",                 C47_INK, C47_PANEL);
         strip_draw_str5x8(strip, sy0, sh, 4,  34, " x^2    f+sqrt        x^y    f+1/x",      C47_INK, C47_PANEL);
         strip_draw_str5x8(strip, sy0, sh, 4,  44, " ALPHA  f+XEQ (AIM)   MATH   f+ (CATALOG)",C47_INK, C47_PANEL);
-        strip_draw_str5x8(strip, sy0, sh, 4,  56, "UP/DOWN  stack, menus, BST/SST",          C47_INK, C47_PANEL);
-        strip_draw_str5x8(strip, sy0, sh, 4,  66, "LEFT     x<>y         RIGHT  Rv (roll)",  C47_INK, C47_PANEL);
-        strip_draw_str5x8(strip, sy0, sh, 4,  78, "VIEWS   cycle display mode:",             C47_INK, C47_PANEL);
-        strip_draw_str5x8(strip, sy0, sh, 4,  88, " full 400x240 / zoom stack / 1:1 pan",    C47_INK, C47_PANEL);
-        strip_draw_str5x8(strip, sy0, sh, 4,  98, " in 1:1, hold ON + arrows to pan",        C47_INK, C47_PANEL);
-        strip_draw_str5x8(strip, sy0, sh, 4, 112, "State auto-saves to /SAVFILES/c47auto.sav",C47_INK, C47_PANEL);
+        strip_draw_str5x8(strip, sy0, sh, 4,  56, "HP shifted legends that C47 keeps",       C47_INK, C47_PANEL);
+        strip_draw_str5x8(strip, sy0, sh, 4,  66, "elsewhere, redirected to match:",         C47_INK, C47_PANEL);
+        strip_draw_str5x8(strip, sy0, sh, 4,  76, " SHIFT+1 PRGM (P/R)   SHIFT+4 MATRIX",    C47_INK, C47_PANEL);
+        strip_draw_str5x8(strip, sy0, sh, 4,  86, " SHIFT+7 LIST (STAT)  others: CATALOG",   C47_INK, C47_PANEL);
+        strip_draw_str5x8(strip, sy0, sh, 4,  98, "UP/DOWN stack & menus  LEFT x<>y",        C47_INK, C47_PANEL);
+        strip_draw_str5x8(strip, sy0, sh, 4, 108, "RIGHT Rv   VIEWS cycles display mode",    C47_INK, C47_PANEL);
+        strip_draw_str5x8(strip, sy0, sh, 4, 118, "1:1 mode: hold ON + arrows to pan",       C47_INK, C47_PANEL);
     }
 }
 
@@ -761,6 +762,34 @@ static void c47_poll_hardware_keys(void) {
                     c47_active_c47_key = base;
                     c47_q_push(base);
                 }
+                return;
+            }
+        }
+
+        // The HP 39gII prints shifted legends on its numeric block, and three of them
+        // name functions C47 keeps on other keys. With f pending, redirect those keys
+        // to the DM42 key whose f-shift *is* the labelled function, so the legend on
+        // the case tells the truth:
+        //
+        //   SHIFT+1 "PRGM"   -> f + R/S = P/R, program entry mode
+        //   SHIFT+4 "MATRIX" -> f + 9   = MATX menu
+        //   SHIFT+7 "LIST"   -> f + /   = STAT menu (C47 has no list type; its
+        //                                statistics registers are the nearest thing)
+        //
+        // This costs C47's own f+1 (ASSIGN), f+4 (BASE) and f+7 (EQN); all three stay
+        // reachable through CATALOG (the MATH key), whose MENUS and FCNS pages list
+        // every menu and function. g-shift on these keys is untouched.
+        if (shiftF && !shiftG) {
+            int redirect = 0;
+            switch (key) {
+                case K39_1: redirect = 36; break; // R/S -> f = P/R
+                case K39_4: redirect = 21; break; // 9   -> f = MATX
+                case K39_7: redirect = 22; break; // /   -> f = STAT
+                default: break;
+            }
+            if (redirect) {
+                c47_active_c47_key = redirect;
+                c47_q_push(redirect);
                 return;
             }
         }
