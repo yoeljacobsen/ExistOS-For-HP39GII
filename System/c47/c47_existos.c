@@ -165,6 +165,15 @@ static int c47_help_page = 0; // 0 = off, 1 = page 1, 2 = page 2
 static uint32_t c47_banner_until_ms = 0;
 static char c47_banner_text[32] = "";
 
+// The HP 39gII panel is 8-bit grayscale with 0x00 darkest and 0xFF lightest (the
+// ExistOS UI draws black text as 0 on a 208 background). C47 composes a 1bpp image
+// where a set bit is "ink", so ink maps to dark shades and bare paper to light ones.
+#define C47_PAPER   0xFF
+#define C47_INK     0x00
+#define C47_PANEL   0xE8  // help-overlay body
+#define C47_BAR     0x20  // help-overlay title bar
+#define C47_BAR_TXT 0xF8  // text on the title bar
+
 // Precomputed X mapping table: col_x0[x] = (x * 400) / 256
 static uint16_t c47_col_x0[LCD_PIX_W + 1];
 static bool c47_tables_initialized = false;
@@ -220,34 +229,34 @@ static void strip_fill_rect(uint8_t *strip, int sy0, int sh, int x0, int y0, int
 }
 
 static void c47_render_help_strip(uint8_t *strip, int sy0, int sh) {
-    strip_fill_rect(strip, sy0, sh, 0, sy0, LCD_PIX_W, sh, 0x10);
-    strip_fill_rect(strip, sy0, sh, 0, 0, LCD_PIX_W, 11, 0xE8);
+    strip_fill_rect(strip, sy0, sh, 0, sy0, LCD_PIX_W, sh, C47_PANEL);
+    strip_fill_rect(strip, sy0, sh, 0, 0, LCD_PIX_W, 11, C47_BAR);
 
     if (c47_help_page == 1) {
-        strip_draw_str5x8(strip, sy0, sh, 4,   2, "C47 ON HP 39gII - KEYMAP (1/2) [APPS:Next]", 0x00, 0xE8);
-        strip_draw_str5x8(strip, sy0, sh, 4,  14, "F1..F6   : Softkeys F1..F6",               0xF0, 0x10);
-        strip_draw_str5x8(strip, sy0, sh, 4,  24, "SYMB     : Sigma+      PLOT : 1/x (INV)",   0xF0, 0x10);
-        strip_draw_str5x8(strip, sy0, sh, 4,  34, "NUM      : SQRT        HOME : XEQ",         0xF0, 0x10);
-        strip_draw_str5x8(strip, sy0, sh, 4,  44, "VARS     : STO         a b/c: RCL",         0xF0, 0x10);
-        strip_draw_str5x8(strip, sy0, sh, 4,  54, "X,T,O,n  : Rv (RDN)    ,    : x<>y (SWAP)", 0xF0, 0x10);
-        strip_draw_str5x8(strip, sy0, sh, 4,  64, "SIN/COS/TAN/LN/LOG : C47 Math Keys",        0xF0, 0x10);
-        strip_draw_str5x8(strip, sy0, sh, 4,  74, "(        : EEX (10^x)  )    : R/S (RUN)",   0xF0, 0x10);
-        strip_draw_str5x8(strip, sy0, sh, 4,  84, "(-)      : +/- (CHS)   BKSP : Backspace",   0xF0, 0x10);
-        strip_draw_str5x8(strip, sy0, sh, 4,  94, "SHIFT    : f / g Shift (cycles f -> g)",    0xF0, 0x10);
-        strip_draw_str5x8(strip, sy0, sh, 4, 104, "ON/C     : EXIT        ON+F3: Quit & Save", 0xF0, 0x10);
-        strip_draw_str5x8(strip, sy0, sh, 4, 116, "VIEWS    : Cycle Display Zoom Mode (Full/Zoom/1:1)", 0xFF, 0x10);
+        strip_draw_str5x8(strip, sy0, sh, 4,   2, "C47 KEYMAP (1/2)            [APPS] next", C47_BAR_TXT, C47_BAR);
+        strip_draw_str5x8(strip, sy0, sh, 4,  14, "F1..F6  softkeys      SYMB   Sigma+",     C47_INK, C47_PANEL);
+        strip_draw_str5x8(strip, sy0, sh, 4,  24, "PLOT    1/x           NUM    sqrt",       C47_INK, C47_PANEL);
+        strip_draw_str5x8(strip, sy0, sh, 4,  34, "LOG     log/10^x      LN     ln/e^x",     C47_INK, C47_PANEL);
+        strip_draw_str5x8(strip, sy0, sh, 4,  44, "HOME    XEQ           VARS   STO",        C47_INK, C47_PANEL);
+        strip_draw_str5x8(strip, sy0, sh, 4,  54, "a b/c   RCL           X,T,n  Rv (roll)",  C47_INK, C47_PANEL);
+        strip_draw_str5x8(strip, sy0, sh, 4,  64, "SIN COS TAN  as labelled",                C47_INK, C47_PANEL);
+        strip_draw_str5x8(strip, sy0, sh, 4,  74, ",       x<>y          (-)    +/- (CHS)",  C47_INK, C47_PANEL);
+        strip_draw_str5x8(strip, sy0, sh, 4,  84, "(       EEX           )      R/S",        C47_INK, C47_PANEL);
+        strip_draw_str5x8(strip, sy0, sh, 4,  94, "SHIFT   f, then g     BKSP   backspace",  C47_INK, C47_PANEL);
+        strip_draw_str5x8(strip, sy0, sh, 4, 104, "ON/C    EXIT          ON+F3  quit & save",C47_INK, C47_PANEL);
+        strip_draw_str5x8(strip, sy0, sh, 4, 116, "Digits, . and + - x / are direct.",       C47_INK, C47_PANEL);
     } else {
-        strip_draw_str5x8(strip, sy0, sh, 4,   2, "C47 ON HP 39gII - KEYMAP (2/2) [APPS:Close]", 0x00, 0xE8);
-        strip_draw_str5x8(strip, sy0, sh, 4,  14, "MATH     :f+XEQ(MATH)  x^2  :f+SQRT (x^2)",  0xF0, 0x10);
-        strip_draw_str5x8(strip, sy0, sh, 4,  24, "x^y      :f+1/x (y^x)  ALPHA:f+ENTER(alpha)",0xF0, 0x10);
-        strip_draw_str5x8(strip, sy0, sh, 4,  34, "UP / DOWN: BST / SST & Menu Page Up/Down",   0xF0, 0x10);
-        strip_draw_str5x8(strip, sy0, sh, 4,  44, "LEFT     : x<>y        RIGHT: Rv (Roll Dn)", 0xF0, 0x10);
-        strip_draw_str5x8(strip, sy0, sh, 4,  56, "DISPLAY MODES (Press [VIEWS] to toggle):",   0xFF, 0x10);
-        strip_draw_str5x8(strip, sy0, sh, 4,  66, " 1. Full 400x240 Anti-Aliased Grayscale",    0xF0, 0x10);
-        strip_draw_str5x8(strip, sy0, sh, 4,  76, " 2. Zoom Stack+Softkeys (Large Stack/Menu)", 0xF0, 0x10);
-        strip_draw_str5x8(strip, sy0, sh, 4,  86, " 3. 1:1 Pixel-Exact (Hold ON+Arrows to pan)",0xF0, 0x10);
-        strip_draw_str5x8(strip, sy0, sh, 4, 100, "STATE PERSISTENCE:",                         0xFF, 0x10);
-        strip_draw_str5x8(strip, sy0, sh, 4, 110, " Auto-saved to /SAVFILES/c47auto.sav on exit",0xF0, 0x10);
+        strip_draw_str5x8(strip, sy0, sh, 4,   2, "C47 KEYMAP (2/2)           [APPS] close", C47_BAR_TXT, C47_BAR);
+        strip_draw_str5x8(strip, sy0, sh, 4,  14, "Keys the HP has and the DM42 does not,",  C47_INK, C47_PANEL);
+        strip_draw_str5x8(strip, sy0, sh, 4,  24, "sent as a shifted pair:",                 C47_INK, C47_PANEL);
+        strip_draw_str5x8(strip, sy0, sh, 4,  34, " x^2    f+sqrt        x^y    f+1/x",      C47_INK, C47_PANEL);
+        strip_draw_str5x8(strip, sy0, sh, 4,  44, " ALPHA  f+XEQ (AIM)   MATH   f+ (CATALOG)",C47_INK, C47_PANEL);
+        strip_draw_str5x8(strip, sy0, sh, 4,  56, "UP/DOWN  stack, menus, BST/SST",          C47_INK, C47_PANEL);
+        strip_draw_str5x8(strip, sy0, sh, 4,  66, "LEFT     x<>y         RIGHT  Rv (roll)",  C47_INK, C47_PANEL);
+        strip_draw_str5x8(strip, sy0, sh, 4,  78, "VIEWS   cycle display mode:",             C47_INK, C47_PANEL);
+        strip_draw_str5x8(strip, sy0, sh, 4,  88, " full 400x240 / zoom stack / 1:1 pan",    C47_INK, C47_PANEL);
+        strip_draw_str5x8(strip, sy0, sh, 4,  98, " in 1:1, hold ON + arrows to pan",        C47_INK, C47_PANEL);
+        strip_draw_str5x8(strip, sy0, sh, 4, 112, "State auto-saves to /SAVFILES/c47auto.sav",C47_INK, C47_PANEL);
     }
 }
 
@@ -296,7 +305,7 @@ static void c47_flush_screen(void) {
                     int cx = c47_pan_x + dx;
                     if (cx < 0) cx = 0;
                     if (cx >= LCD_X) cx = LCD_X - 1;
-                    dst[dx] = c47_px_black(line, cx) ? 0xFF : 0x00;
+                    dst[dx] = c47_px_black(line, cx) ? C47_INK : C47_PAPER;
                 }
             } else {
                 // Mode 0 (Full 400x240) or Mode 1 (Zoomed Status + Stack Y/X + Softkeys)
@@ -342,21 +351,21 @@ static void c47_flush_screen(void) {
                         }
                     }
 
-                    // Contrast-enhanced 8-bit grayscale mapping for HP 39gII STN LCD:
-                    // Even a single black subpixel produces a clearly visible stroke (0x78),
-                    // 2 subpixels -> 0xB8, 3+ subpixels -> 0xFF (solid black).
-                    uint8_t shade = 0x00;
+                    // Coverage -> shade, biased dark: on this STN panel a stroke thinned
+                    // to one subpixel by the 400->256 downscale still has to read as a
+                    // stroke, so partial coverage lands nearer ink than linear would put it.
+                    uint8_t shade = C47_PAPER;
                     if (black > 0) {
                         if (black == total) {
-                            shade = 0xFF;
+                            shade = C47_INK;
                         } else if (total == 4) {
-                            static const uint8_t lut4[5] = {0x00, 0x70, 0xB8, 0xE8, 0xFF};
+                            static const uint8_t lut4[5] = {0xFF, 0x8F, 0x47, 0x17, 0x00};
                             shade = lut4[black];
                         } else if (total == 2) {
-                            shade = (black == 1) ? 0x98 : 0xFF;
+                            shade = (black == 1) ? 0x67 : C47_INK;
                         } else {
-                            int v = (black * 300) / total;
-                            if (v > 255) v = 255;
+                            int v = 255 - (black * 300) / total;
+                            if (v < 0) v = 0;
                             shade = (uint8_t)v;
                         }
                     }
@@ -368,8 +377,8 @@ static void c47_flush_screen(void) {
         if (show_banner && sy0 == 0) {
             int bw = (int)strlen(c47_banner_text) * 6 + 6;
             int bx = (LCD_PIX_W - bw) / 2;
-            strip_fill_rect(c47_strip_buf, sy0, sh, bx, 0, bw, 10, 0xF0);
-            strip_draw_str5x8(c47_strip_buf, sy0, sh, bx + 3, 1, c47_banner_text, 0x00, 0xF0);
+            strip_fill_rect(c47_strip_buf, sy0, sh, bx, 0, bw, 10, C47_BAR);
+            strip_draw_str5x8(c47_strip_buf, sy0, sh, bx + 3, 1, c47_banner_text, C47_BAR_TXT, C47_BAR);
         }
 
         ll_disp_put_area(c47_strip_buf, 0, (uint32_t)sy0, LCD_PIX_W - 1, (uint32_t)(sy0 + sh - 1));
@@ -626,11 +635,13 @@ static int c47_map_39gii_key(uint32_t k39) {
         case K39_XTPHIN:         return 9;  // KEY_RDN   (R down / pi)
         case K39_BACKSPACE:      return 17; // KEY_BSP   (Backspace / CLX / DROP)
 
-        // D-Pad
-        case K39_UP:             return 18; // KEY_UP    (BST / Up)
-        case K39_DOWN:           return 23; // KEY_DOWN  (SST / Down)
-        case K39_LEFT:           return 14; // KEY_SWAP  (x<>y / Left)
-        case K39_RIGHT:          return 9;  // KEY_RDN   (R down / Right)
+        // D-pad. The DM42 keyboard has no horizontal arrows, so left/right take the
+        // stack meanings that read naturally in that direction; they duplicate the
+        // "," and X,T,n keys rather than going unused.
+        case K39_UP:             return 18; // KEY_UP    (up / BST)
+        case K39_DOWN:           return 23; // KEY_DOWN  (down / SST)
+        case K39_LEFT:           return 14; // KEY_SWAP  (x<>y)
+        case K39_RIGHT:          return 9;  // KEY_RDN   (roll down)
 
         // Row 4: Trig & Logs
         case K39_SIN:            return 10; // KEY_SIN
@@ -728,34 +739,30 @@ static void c47_poll_hardware_keys(void) {
             return;
         }
 
-        // Dedicated composite shortcut keys on HP 39gII:
-        //   K39_X2    (x^2)   -> f + SQRT (x^2 in C47)
-        //   K39_XY    (x^y)   -> f + INV  (y^x in C47)
-        //   K39_MATH  (MATH)  -> f + XEQ  (MATH menu in C47)
-        //   K39_ALPHA (ALPHA) -> f + ENTER (alpha mode in C47)
-        if (!shiftF && !shiftG) {
-            if (key == K39_X2) {
-                c47_push_shifted_key(28, 3);  // f + SQRT = x^2
+        // Four HP keys have no DM42 counterpart but name a function C47 reaches via
+        // f-shift, so they are sent as a synthetic f + key pair:
+        //   x^2   -> f + sqrt  (key 3)   x^y   -> f + 1/x  (key 2)
+        //   ALPHA -> f + XEQ   (key 6)   MATH  -> f + "+"  (key 37, CATALOG)
+        // With a shift already pending the user is after that shift's own meaning, so
+        // pass the base key straight through (e.g. g + ALPHA = g + XEQ = GTO).
+        {
+            int base = 0;
+            switch (key) {
+                case K39_X2:    base = 3;  break;  // f + sqrt = x^2
+                case K39_XY:    base = 2;  break;  // f + 1/x  = y^x
+                case K39_ALPHA: base = 6;  break;  // f + XEQ  = AIM (alpha entry)
+                case K39_MATH:  base = 37; break;  // f + "+"  = CATALOG
+                default: break;
+            }
+            if (base) {
+                if (!shiftF && !shiftG) {
+                    c47_push_shifted_key(28, base);
+                } else {
+                    c47_active_c47_key = base;
+                    c47_q_push(base);
+                }
                 return;
             }
-            if (key == K39_XY) {
-                c47_push_shifted_key(28, 2);  // f + 1/x  = y^x
-                return;
-            }
-            if (key == K39_MATH) {
-                c47_push_shifted_key(28, 6);  // f + XEQ  = MATH
-                return;
-            }
-            if (key == K39_ALPHA) {
-                c47_push_shifted_key(28, 13); // f + ENTER = alpha
-                return;
-            }
-        } else {
-            // If f or g shift is already active, map them to their base keys
-            if (key == K39_X2)    { c47_active_c47_key = 3;  c47_q_push(3);  return; }
-            if (key == K39_XY)    { c47_active_c47_key = 2;  c47_q_push(2);  return; }
-            if (key == K39_MATH)  { c47_active_c47_key = 6;  c47_q_push(6);  return; }
-            if (key == K39_ALPHA) { c47_active_c47_key = 13; c47_q_push(13); return; }
         }
 
         int mapped = c47_map_39gii_key(key);
