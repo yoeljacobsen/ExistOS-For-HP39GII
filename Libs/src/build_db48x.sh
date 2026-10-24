@@ -31,6 +31,31 @@ cp "${ROOT_DIR}/System/dmcp/ff_ifc.h" "${GEN_DIR}/ff_ifc.h"
 
 VERSION="$(git -C "${WORK_DIR}" describe --tags --always 2>/dev/null || echo existos)"
 
+# program_init() allocates the RPL runtime arena with malloc() and never frees
+# it, and it runs on every launch -- so under ExistOS, where the application is
+# started and exited repeatedly rather than being the only program on the
+# device, the second launch leaked the arena and failed. Hand it a reusable one
+# from the platform layer instead. (build_c47.sh patches its upstream the same
+# way, for the same kind of reason.)
+# The declaration goes at namespace scope: a linkage specification is not
+# allowed inside a function body.
+sed -i 's|^surface Screen(|extern "C" void *dmcp_rpl_arena(size_t size);\n\nsurface Screen(|' \
+    "${WORK_DIR}/src/dmcp/main.cc"
+sed -i 's|byte \*memory = (byte \*) malloc(size);|byte *memory = (byte *) dmcp_rpl_arena(size);|' \
+    "${WORK_DIR}/src/dmcp/main.cc"
+grep -q "dmcp_rpl_arena" "${WORK_DIR}/src/dmcp/main.cc" || { echo "ERROR: arena patch did not apply"; exit 1; }
+
+# HeaderFont defaults to LIB17, one of the DM42 firmware's own bitmap fonts.
+# Those live in DMCP and have no counterpart here, so every metric taken from
+# them is garbage: the header reported a height of roughly the whole screen,
+# which left no room for the stack or the menu and put the battery annunciator
+# in the middle of the display. Every other font setting already defaults to one
+# of DB48X's own compiled-in fonts; make this one match.
+sed -i 's|\(SETTING_BITS(HeaderFont.*\)settings::LIB17|\1settings::REDUCED|' \
+    "${WORK_DIR}/src/ids.tbl"
+grep -q "SETTING_BITS(HeaderFont.*settings::REDUCED" "${WORK_DIR}/src/ids.tbl" \
+    || { echo "ERROR: header font patch did not apply"; exit 1; }
+
 CXXFLAGS=(
     -mtune=arm926ej-s
     -mcpu=arm926ej-s

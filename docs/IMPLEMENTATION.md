@@ -17,7 +17,7 @@ All work is on **`c47-app`** (fork `yoeljacobsen/ExistOS-For-HP39GII`).
 | OSLoader power-off | **fixed** — works on battery; stands by on USB (hardware limit) |
 | OSLoader diagnostics | **fixed** — fault dumps and app output reach the USB console |
 | Emu48 | **removed** — see "Why Emu48 was abandoned" |
-| DB48X RPN/RPL app | **links and flashes** — untested on device |
+| DB48X RPN/RPL app | **runs**; layout fixes pending verification on device |
 
 ## Build and flash
 
@@ -237,10 +237,49 @@ The DMCP bitmap fonts are supplied by the DM42 firmware and have no counterpart
 here; they need either real data or substitutes mapped onto the ExistOS fonts.
 Everything else is small.
 
+## DB48X on-device findings
+
+Four things stood between "links" and "runs". Each is the same shape: DB48X
+assumes it is the only program on a DM42, where the firmware owns resources for
+the whole session. Under ExistOS it is launched and exited repeatedly.
+
+1. **`Screen` is bound in a global constructor.**
+   `surface Screen((pixword *) lcd_line_addr(0), ...)` runs from `.init_array`
+   at System boot, long before any application starts, so it captured a
+   not-yet-allocated heap pointer — null — and every draw faulted at address 0.
+   The LCD buffer is a static array now, so it exists before static init.
+
+2. **Pixel polarity is the opposite of C47's.** `blitter.h` says it outright:
+   *"On the DM42, white is 0 and black is 1."* C47 blanks to `0xFF` and treats a
+   clear bit as ink. Per-application now (`ink_is_set_bit`).
+
+3. **`program_init()` mallocs the RPL arena on every launch and never frees it.**
+   Harmless on a DM42; here the second launch leaked it. The build patches
+   `main.cc` to call `dmcp_rpl_arena()`, which allocates once and reuses.
+   `runtime::memory()` reinitialises everything from the block it is given, so
+   one block across launches is exactly right.
+
+4. **`HeaderFont` defaults to `LIB17`**, a DM42 *firmware* bitmap font reached
+   through `dmcp_font`, whose metrics come from DMCP tables that do not exist
+   here. `draw_battery()` puts annunciators at
+   `(header_font()->height() + 1 - 12) / 2`; the captured icon at y≈114 of 240
+   back-solves to a reported header height of ~240 — the header claimed the
+   whole screen, leaving no room for the stack or the menu. Every other font
+   setting already defaults to one of DB48X's own compiled-in sparse fonts;
+   the build patches this one to `REDUCED`.
+
+Separately, the "works once per boot" symptom was **not** the arena — the log
+shows it allocating fine. `db48x_exit` is the platform layer's flag, set on exit
+and never cleared. C47 clears its own `backToDMCP` at the top of
+`program_main()`, but an application whose main loop never returns has no such
+moment, so the next launch saw the flag already set and quit within half a
+second. `dmcp_run()` clears it on entry.
+
 ## Next steps
 
-1. **Test both applications on the device.** C47 is the regression test for the
-   extraction; DB48X has never run.
+1. **Verify the header-font and exit-flag fixes on device** (built, not yet
+   flashed at the time of writing). Capture with `scrcap` rather than working
+   from a description.
 2. `sys_free_mem()` returns `DMCP_APP_HEAP_BUDGET`, currently 64 KB. It is a
    deliberate budget, not the real free heap: the VM keeps ~40 KB of RAM
    resident and spills the rest to NAND. Tune against `VMRATE` — `nandrd/s` in

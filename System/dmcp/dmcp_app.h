@@ -52,3 +52,7 @@ bool dmcp_run(const dmcp_app_t *app);
 // Draw a few lines of 5x8 text and wait for a key. Used to report a refusal to
 // start without leaving the user at a blank screen.
 void dmcp_show_message(const char *const *lines, int count);
+
+// Reusable arena for an application's own heap, in place of a malloc() it never
+// frees. See the note in dmcp_existos.c.
+void *dmcp_rpl_arena(size_t size);

@@ -1486,6 +1486,28 @@ int sys_free_mem(void) {
     return DMCP_APP_HEAP_BUDGET;
 }
 
+// The RPL runtime arena, handed to DB48X in place of the malloc() its
+// program_init() would otherwise do. That malloc is never freed, and
+// program_init() runs on every launch, so each relaunch leaked the whole arena
+// and the second one failed -- the application could be started once per boot.
+// runtime::memory() reinitialises everything from the block it is given, so one
+// block reused across launches is not just safe but exactly right.
+void *dmcp_rpl_arena(size_t size) {
+    static void  *arena = NULL;
+    static size_t arena_size = 0;
+
+    if (arena && arena_size >= size) {
+        return arena;
+    }
+    if (arena) {
+        free(arena);
+    }
+    arena = malloc(size);
+    arena_size = arena ? size : 0;
+    printf("DMCP: RPL arena %u bytes = %p\n", (unsigned)size, arena);
+    return arena;
+}
+
 int __sysfn_read_key(int *k1, int *k2) {
     int n = 0;
     uint32_t keys = ll_vm_check_key();
@@ -1564,6 +1586,16 @@ bool dmcp_run(const dmcp_app_t *app) {
 
     g_dmcp_app = app;
     g_dmcp_ink_set = app->ink_is_set_bit;
+
+    // Clear the exit flag before starting. C47 clears its own backToDMCP at the
+    // top of program_main(), but an application whose main loop never returns
+    // has no such moment: DB48X's flag is ours, it was left set by the previous
+    // exit, and the next launch saw it immediately and quit within half a
+    // second. Only once per boot looked like a leak; it was this.
+    if (app->exit_flag) {
+        *app->exit_flag = 0;
+    }
+
     SystemUISuspend();
 
     // These applications want far more RAM than the on-chip heap holds, so the
