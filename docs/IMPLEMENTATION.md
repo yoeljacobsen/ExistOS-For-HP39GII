@@ -17,7 +17,7 @@ All work is on **`c47-app`** (fork `yoeljacobsen/ExistOS-For-HP39GII`).
 | OSLoader power-off | **fixed** — works on battery; stands by on USB (hardware limit) |
 | OSLoader diagnostics | **fixed** — fault dumps and app output reach the USB console |
 | Emu48 | **removed** — see "Why Emu48 was abandoned" |
-| DB48X RPN/RPL app | **not started** — design in `DESIGN.md` |
+| DB48X RPN/RPL app | **core cross-compiles** — platform layer outstanding |
 
 ## Build and flash
 
@@ -137,14 +137,51 @@ Also worth keeping: the shipped `rom.g39` was never a Saturn ROM — it is an
 HP 39gs ARM firmware image (`KINPOHP39G+IMAGE`). `load_rom()` learned to say so.
 A real dump (`rom.39g`, 2 M nibbles, unpacked) does work.
 
-## Next steps for the DB48X port
+## DB48X port — current state
+
+**`Libs/src/build_db48x.sh` builds the whole DB48X core for ARM926EJ-S.** All 63
+sources compile (60 `src/*.cc`, the 4 fonts, and `src/dmcp/{target,sysmenu,main}.cc`),
+producing a 4.1 MB `Libs/libdb48x_core.libc`. The library is *not* committed yet
+because nothing links it; run the script to produce it.
+
+Four build details that were not obvious:
+
+- **`-std=gnu++17`, not `-std=c++17`.** `settings.h` uses `typeof(Init)` in its
+  `SETTING` macro, a GNU extension; with strict ISO every one of the 55 sources
+  that reaches `ids.tbl` fails.
+- `-D__packed=...` and `-D__weak=...`, as for C47.
+- `HELPFILE_NAME` / `HELPINDEX_NAME` are normally set by DB48X's Makefile from
+  the firmware name; we set them to `/help/db48x.{md,idx}`.
+- `-I src/dm42` for the MODEL-specific `main.h`.
+
+`System/c47/dmcp.h` gained two things, both harmless to C47 (which is C):
+`extern "C"` guards, since DB48X is C++ and declares the DMCP entry points with
+C linkage; and a declaration of `__sysfn_read_key(int *k1, int *k2)`, the
+low-level key-state reader DB48X uses for transient alpha mode.
+
+### What the platform layer still owes DB48X
+
+179 undefined symbols, nearly all libc/libm. Stripped of those and of symbols
+C47 already implements, the real gap is:
+
+| Area | Symbols |
+| :--- | :--- |
+| Power | `get_lowbat_state`, `read_power_voltage` |
+| Date | `get_month_shortcut`, `get_wday_shortcut`, `julian_day` |
+| UI | `handle_menu`, `msg_box`, `lcd_for_calc`, `lcd_switchFont`, `lcd_writeClr` |
+| System | `set_reset_magic`, `prog_build_id`, `qspi_build_id`, `__sysfn_read_key` |
+| DMCP fonts | `lcd_fonts`, `LibMonoFont{10x17,11x18,12x20,14x22,17x25,17x28}`, `SkrMono13x18`, `Free42Font`, `MenuFont`, `ErrorFont` |
+
+The DMCP bitmap fonts are supplied by the DM42 firmware and have no counterpart
+here; they need either real data or substitutes mapped onto the ExistOS fonts.
+Everything else is small.
+
+## Next steps
 
 1. Extract `System/dmcp/` from `System/c47/c47_existos.c` — display adapter,
    keyboard map, timers/RTC/battery, `sdb`. **C47 must keep working** throughout;
    it is the regression test.
-2. `Libs/src/build_db48x.sh`, modelled on `build_c47.sh`: clone
-   `github.com/c3d/db48x`, build the `.cc` sources for ARM926EJ-S with the
-   ExistOS `dmcp.h`, emit `Libs/libdb48x_core.libc`.
+2. Implement the gap above in the shared layer.
 3. `System/db48x/db48x_existos.c` — task, heap, `sys_free_mem()` returning the
    chosen budget (start 64 KB), launcher entry.
 4. Third launcher icon, `StartDB48X()`.

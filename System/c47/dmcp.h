@@ -49,6 +49,12 @@ typedef unsigned int uint;
 
 #include "ff_ifc.h"
 
+// The DMCP API is C. DB48X is C++ and declares these entry points extern "C",
+// so the header has to agree or the linkage conflicts.
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 
 // ----------------------------------
 
@@ -870,6 +876,11 @@ int key_empty();
 int key_push(int k1);
 int key_tail();
 int key_pop();
+
+// Low-level key state: fills k1/k2 with the keys currently held and returns how
+// many there are (0, 1 or 2). DB48X uses it for transient alpha mode; C47 does
+// not. Implemented by the ExistOS platform layer.
+int __sysfn_read_key(int *k1, int *k2);
 int key_pop_last();
 void key_pop_all();
 
@@ -1000,5 +1011,9 @@ int update_bmp_file_header(FIL* fp, int width, int height, uint32_t bg_color);
 
 
 
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif
