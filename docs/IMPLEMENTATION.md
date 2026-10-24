@@ -17,7 +17,7 @@ All work is on **`c47-app`** (fork `yoeljacobsen/ExistOS-For-HP39GII`).
 | OSLoader power-off | **fixed** — works on battery; stands by on USB (hardware limit) |
 | OSLoader diagnostics | **fixed** — fault dumps and app output reach the USB console |
 | Emu48 | **removed** — see "Why Emu48 was abandoned" |
-| DB48X RPN/RPL app | **core cross-compiles** — platform layer outstanding |
+| DB48X RPN/RPL app | **links and flashes** — untested on device |
 
 ## Build and flash
 
@@ -137,7 +137,48 @@ Also worth keeping: the shipped `rom.g39` was never a Saturn ROM — it is an
 HP 39gs ARM firmware image (`KINPOHP39G+IMAGE`). `load_rom()` learned to say so.
 A real dump (`rom.39g`, 2 M nibbles, unpacked) does work.
 
-## DB48X port — current state
+## Shared DMCP platform layer
+
+`System/dmcp/` holds one DMCP implementation serving whichever application is
+running — C47, DB48X, and anything else built on the API. Only one runs at a
+time. Layout:
+
+    System/dmcp/dmcp_existos.c   the platform layer (was System/c47/c47_existos.c)
+    System/dmcp/dmcp_app.h       the hooks an application supplies
+    System/c47/c47_app.c         C47 glue: RAM pool, indicators, StartC47()
+    System/db48x/db48x_app.c     DB48X glue: StartDB48X()
+
+An application supplies `name`, `run()` (its renamed `program_main`),
+`indicators()` (its own shift/alpha/busy state → `INDICATE_*`), an `exit_flag`,
+and `never_returns`.
+
+`never_returns` matters: **DB48X's `program_main()` is `while (true)`**. On a
+DM42 the firmware ends the program from inside `sys_sleep()`. Here `dmcp_run()`
+wraps the call in `setjmp`, and `sys_sleep()` / `runner_get_key()` `longjmp`
+back out when an exit is requested, so the layer's teardown still runs. C47 sets
+`never_returns = false` because it returns normally after saving its state, and
+must be allowed to.
+
+Four link-level problems came out of putting two DMCP applications in one
+binary. Each is handled in the build scripts, not by patching upstream:
+
+1. **Both cores define `program_main`.** `objcopy --redefine-sym` renames them
+   to `c47_program_main` / `db48x_program_main`.
+2. **Both define `Settings`.** `build_db48x.sh` recomputes the collision set
+   against `libc47_core` and renames each with a `db48x_` prefix, so a future
+   clash reports itself instead of failing with a bare symbol name.
+3. **Circular references** — the cores call the DMCP API, the layer calls back
+   into the application — so the libraries are linked inside
+   `-Wl,--start-group ... --end-group`.
+4. **`ff_ifc.h` must be inside `dmcp.h`'s `extern "C"` block**, or C++ callers
+   get mangled `f_open` and friends.
+
+One host-tool bug surfaced: `tools/sys_signer/main.c` read symbol names with an
+unbounded `sscanf("%s")` into `char[1024]`. DB48X's C++ mangled names run past
+that and smashed the stack, so signing segfaulted on the larger image. Bounded
+to `%1023s`.
+
+## DB48X build
 
 **`Libs/src/build_db48x.sh` builds the whole DB48X core for ARM926EJ-S.** All 63
 sources compile (60 `src/*.cc`, the 4 fonts, and `src/dmcp/{target,sysmenu,main}.cc`),
@@ -178,11 +219,13 @@ Everything else is small.
 
 ## Next steps
 
-1. Extract `System/dmcp/` from `System/c47/c47_existos.c` — display adapter,
-   keyboard map, timers/RTC/battery, `sdb`. **C47 must keep working** throughout;
-   it is the regression test.
-2. Implement the gap above in the shared layer.
-3. `System/db48x/db48x_existos.c` — task, heap, `sys_free_mem()` returning the
-   chosen budget (start 64 KB), launcher entry.
-4. Third launcher icon, `StartDB48X()`.
-5. Bring up to a stack display, then tune the heap against `VMRATE`.
+1. **Test both applications on the device.** C47 is the regression test for the
+   extraction; DB48X has never run.
+2. `sys_free_mem()` returns `DMCP_APP_HEAP_BUDGET`, currently 64 KB. It is a
+   deliberate budget, not the real free heap: the VM keeps ~40 KB of RAM
+   resident and spills the rest to NAND. Tune against `VMRATE` — `nandrd/s` in
+   the hundreds means the budget is too large, not too small.
+3. `db48x_indicators()` is a stub returning 0; map DB48X's shift/alpha state.
+4. DB48X reuses C47's launcher icon; it needs its own.
+5. `handle_menu()` and `msg_box()` decline rather than implementing DMCP's
+   firmware menus. Revisit if DB48X depends on them for anything important.

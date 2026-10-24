@@ -305,6 +305,11 @@ void drawPage(int page) {
         uidisp->draw_printf(mainw->content_x0 + 104,
                             mainw->content_y0 + 12 + 48 + 1, 16, 0, 0xFF, "C47");
 
+        // TODO: DB48X needs an icon of its own; reusing C47's for now.
+        uidisp->draw_bmp((char *)gImage_c47_ico, mainw->content_x0 + 172, mainw->content_y0 + 12, 48, 48);
+        uidisp->draw_printf(mainw->content_x0 + 178,
+                            mainw->content_y0 + 12 + 48 + 1, 16, 0, 0xFF, "DB48X");
+
         uidisp->draw_box((mainw->content_x0 + 12) + appPage_select * 80,
                          mainw->content_y0 + 12,
                          (mainw->content_x0 + 12) + 48 + appPage_select * 80,
@@ -686,7 +691,7 @@ void keyMsg(uint32_t key, int state) {
                 goto CONSOLE_KEY_EVENT;
             }
             if (curPage == 0) {
-                if (appPage_select < 1) {
+                if (appPage_select < 2) {
                     appPage_select++;
                     drawPage(curPage);
                 }
@@ -737,6 +742,9 @@ void keyMsg(uint32_t key, int state) {
                 } else if (appPage_select == 1) {
                     void StartC47();
                     StartC47();
+                } else if (appPage_select == 2) {
+                    void StartDB48X();
+                    StartDB48X();
                 }
             } else if (curPage == 1) {
                 goto CONSOLE_KEY_EVENT;

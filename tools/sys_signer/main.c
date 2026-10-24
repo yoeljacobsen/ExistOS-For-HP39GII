@@ -33,7 +33,7 @@ uint32_t calc_sys_sym_hash() {
 
     int i = 0;
 
-    fr = sscanf((const char *)&buf_syself[i], "%08X %c %s", &addr, &type, s);
+    fr = sscanf((const char *)&buf_syself[i], "%08X %c %1023s", &addr, &type, s);
     while (fr == 3)
     {
         if ((type >= 'A') && type <= 'Z')
@@ -55,7 +55,7 @@ uint32_t calc_sys_sym_hash() {
                 break;
             }
         }
-        fr = sscanf((const char *)&buf_syself[i], "%08X %c %s", &addr, &type, s);
+        fr = sscanf((const char *)&buf_syself[i], "%08X %c %1023s", &addr, &type, s);
     }
     return hash;
     /*

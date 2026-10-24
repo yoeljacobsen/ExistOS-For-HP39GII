@@ -71,29 +71,30 @@ enum {
 #define __FF_IFC_H__
 #include "dmcp.h"
 
-// External C47 symbols from libc47_core.a
-extern uint8_t *lcd_buffer;
-extern uint8_t  backToDMCP;
-extern uint8_t  shiftF;
-extern uint8_t  shiftG;
-extern uint8_t  calcMode;
-extern uint8_t  alphaCase;
-extern uint8_t  programRunStop;
-extern uint32_t *ram;
-extern void    *globalRegister;
-extern void    *freeMemoryRegions;
-extern uint8_t  inKeyBuffer(uint8_t byte);
-extern void     clearKeyBuffer(void);
+// The DMCP applications (C47, DB48X) each supply these. Only one runs at a
+// time, so one platform layer serves whichever is active.
+#include <setjmp.h>
 
-typedef struct {
-    uint16_t charCode;
-    uint8_t  colsBeforeGlyph;
-    uint8_t  colsGlyph;
-    uint8_t  colsAfterGlyph;
-    uint8_t  rowsGlyph;
-    char    *data;
-} c47_glyph_t;
-extern c47_glyph_t glyphNotFound;
+#include "dmcp_app.h"
+
+const dmcp_app_t *g_dmcp_app = NULL;
+
+// DB48X's program_main() is an infinite loop: on a DM42 the firmware ends the
+// program from inside sys_sleep(). Reproduce that with a jump back into
+// dmcp_run(), so the platform layer's teardown still runs.
+static jmp_buf g_dmcp_exit_jmp;
+
+static void dmcp_leave_if_asked(void) {
+    if (g_dmcp_app && g_dmcp_app->never_returns && dmcp_exit_requested()) {
+        longjmp(g_dmcp_exit_jmp, 1);
+    }
+}
+
+// Build identifiers. DB48X refuses to start if these differ, which on a DM42
+// catches a program flashed against a stale QSPI image. There is no separate
+// QSPI image here, so they are equal by construction.
+const uint prog_build_id = 0;
+const uint qspi_build_id = 0;
 
 // ExistOS built-in 5x8 and 6x12 fonts from System/graphics/vgafont.c
 extern const unsigned char VGA_Ascii_5x8[];
@@ -108,8 +109,6 @@ extern size_t   getOnChipHeapAllocated(void);
 extern size_t   getSwapMemHeapAllocated(void);
 extern uint32_t getHeapAddr(void);
 
-// C47 RAM pool: RAM_SIZE_IN_BLOCKS (65534) blocks of 2^BPB (4) bytes each.
-#define C47_RAM_POOL_BYTES  (65534u * 4u)
 
 // DMCP System Data Block (sdb)
 sys_sdb_t sdb;
@@ -135,17 +134,17 @@ static uint8_t *c47_strip_buf   = NULL;
 // the serial log shows how far program_main() got before a fault. Build with
 // -DC47_DEBUG_TRACE to turn it on; a faulting indirect call through an unset sdb hook
 // leaves no stack trace, and this is what located the last one.
-#ifdef C47_DEBUG_TRACE
-    #define C47_TRACE(name)                                   \
+#ifdef DMCP_DEBUG_TRACE
+    #define DMCP_TRACE(name)                                   \
         do {                                                  \
             static uint8_t seen_##name = 0;                   \
             if (!seen_##name) {                               \
                 seen_##name = 1;                              \
-                printf("C47 trace: " #name "\n");             \
+                printf("DMCP trace: " #name "\n");             \
             }                                                 \
         } while (0)
 #else
-    #define C47_TRACE(name) do { } while (0)
+    #define DMCP_TRACE(name) do { } while (0)
 #endif
 
 static int c47_buf_cleared = 0;
@@ -262,15 +261,7 @@ static void c47_render_help_strip(uint8_t *strip, int sy0, int sh) {
 }
 
 static void c47_update_indicators(void) {
-    int ind = 0;
-    if (shiftF) ind |= INDICATE_LEFT;
-    if (shiftG) ind |= INDICATE_RIGHT;
-    if (calcMode == 3 /* CM_AIM */ || calcMode == 11 /* CM_EIM */) {
-        ind |= (alphaCase == 0) ? INDICATE_A__Z : INDICATE_a__z;
-    }
-    if (programRunStop == 1 /* PGM_RUNNING */) {
-        ind |= INDICATE_BUSY;
-    }
+    int ind = (g_dmcp_app && g_dmcp_app->indicators) ? g_dmcp_app->indicators() : 0;
     ll_disp_set_indicator(ind, -1);
 }
 
@@ -403,7 +394,7 @@ static void c47_show_banner(const char *msg) {
 // ============================================================================
 
 uint8_t *lcd_line_addr(int y) {
-    C47_TRACE(lcd_line_addr);
+    DMCP_TRACE(lcd_line_addr);
     if (!c47_raw_lcd_buf) return NULL;
     if (y < 0) y = 0;
     if (y >= LCD_Y) y = LCD_Y - 1;
@@ -417,7 +408,7 @@ void LCD_write_line(uint8_t *buf) {
 }
 
 void lcd_clear_buf(void) {
-    C47_TRACE(lcd_clear_buf);
+    DMCP_TRACE(lcd_clear_buf);
     if (!c47_raw_lcd_buf) return;
     for (int row = 0; row < LCD_Y; row++) {
         uint8_t *line_buf = &c47_raw_lcd_buf[row * 52];
@@ -429,7 +420,7 @@ void lcd_clear_buf(void) {
 }
 
 void lcd_refresh(void) {
-    C47_TRACE(lcd_refresh);
+    DMCP_TRACE(lcd_refresh);
     c47_flush_screen();
 }
 
@@ -442,12 +433,12 @@ void lcd_refresh_wait(void) {
 }
 
 void lcd_forced_refresh(void) {
-    C47_TRACE(lcd_forced_refresh);
+    DMCP_TRACE(lcd_forced_refresh);
     c47_flush_screen();
 }
 
 void lcd_refresh_lines(int ln, int cnt) {
-    C47_TRACE(lcd_refresh_lines);
+    DMCP_TRACE(lcd_refresh_lines);
     (void)ln;
     (void)cnt;
     c47_flush_screen();
@@ -467,7 +458,7 @@ void LCD_power_on(void) {
 void LCD_power_off(int clear) {
     (void)clear;
     // When user presses SHIFT + EXIT (OFF) in C47, exit cleanly back to ExistOS launcher
-    backToDMCP = 1;
+    dmcp_request_exit();
 }
 
 void draw_power_off_image(int allow_errors) {
@@ -475,7 +466,7 @@ void draw_power_off_image(int allow_errors) {
 }
 
 void bitblt24(uint32_t x, uint32_t dx, uint32_t y, uint32_t val, int blt_op, int fill) {
-    C47_TRACE(bitblt24);
+    DMCP_TRACE(bitblt24);
     if (!c47_raw_lcd_buf || dx < 1 || dx > 24 || y >= LCD_Y) {
         return;
     }
@@ -550,7 +541,7 @@ void lcd_setLine(disp_stat_t *ds, int ln_nr) {
 }
 
 void lcd_writeText(disp_stat_t *ds, const char *text) {
-    C47_TRACE(lcd_writeText);
+    DMCP_TRACE(lcd_writeText);
     if (!ds || !text) return;
     int x = ds->x;
     int y = ds->y;
@@ -613,6 +604,14 @@ static void c47_push_shifted_key(int shift_key, int main_key) {
     c47_q_push(0);
     c47_q_push(main_key);
     c47_active_c47_key = main_key;
+}
+
+// f/g shift state. The applications keep their own, so the platform layer
+// tracks what it has sent: 0 = none, 1 = f pending, 2 = g pending.
+static int c47_shift_level = 0;
+
+static int c47_shift_pending(void) {
+    return c47_shift_level;
 }
 
 static int c47_map_39gii_key(uint32_t k39) {
@@ -757,8 +756,9 @@ static void c47_poll_hardware_keys(void) {
                 default: break;
             }
             if (base) {
-                if (!shiftF && !shiftG) {
+                if (!c47_shift_pending()) {
                     c47_push_shifted_key(28, base);
+                    c47_shift_level = 0;
                 } else {
                     c47_active_c47_key = base;
                     c47_q_push(base);
@@ -780,7 +780,7 @@ static void c47_poll_hardware_keys(void) {
         // This costs C47's own f+1 (ASSIGN), f+4 (BASE) and f+7 (EQN); all three stay
         // reachable through CATALOG (the MATH key), whose MENUS and FCNS pages list
         // every menu and function. g-shift on these keys is untouched.
-        if (shiftF && !shiftG) {
+        if (c47_shift_pending() == 1) {
             int redirect = 0;
             switch (key) {
                 case K39_1: redirect = 36; break; // R/S -> f = P/R
@@ -789,6 +789,7 @@ static void c47_poll_hardware_keys(void) {
                 default: break;
             }
             if (redirect) {
+                c47_shift_level = 0;
                 c47_active_c47_key = redirect;
                 c47_q_push(redirect);
                 return;
@@ -797,6 +798,11 @@ static void c47_poll_hardware_keys(void) {
 
         int mapped = c47_map_39gii_key(key);
         if (mapped > 0) {
+            if (mapped == 28) {                 // SHIFT: none -> f -> g -> none
+                c47_shift_level = (c47_shift_level + 1) % 3;
+            } else {
+                c47_shift_level = 0;            // any other key consumes it
+            }
             c47_active_c47_key = mapped;
             c47_q_push(mapped);
         }
@@ -825,7 +831,7 @@ int key_empty(void) {
 }
 
 int key_pop(void) {
-    C47_TRACE(key_pop);
+    DMCP_TRACE(key_pop);
     c47_poll_hardware_keys();
     if (c47_key_q_head == c47_key_q_tail) {
         return -1;
@@ -854,8 +860,9 @@ int key_tail(void) {
 }
 
 int runner_get_key(int *repeat) {
+    dmcp_leave_if_asked();
     if (repeat) *repeat = 0;
-    while (!backToDMCP) {
+    while (!dmcp_exit_requested()) {
         int k = key_pop();
         if (k > 0) {
             return k;
@@ -894,7 +901,7 @@ static uint32_t c47_systim_deadline[SYSTIM_COUNT];
 static uint8_t  c47_systim_enabled[SYSTIM_COUNT];
 
 uint32_t sys_current_ms(void) {
-    C47_TRACE(sys_current_ms);
+    DMCP_TRACE(sys_current_ms);
     return ll_get_time_ms();
 }
 
@@ -930,7 +937,14 @@ int sys_timer_timeout(int timer_ix) {
 }
 
 void sys_sleep(void) {
-    C47_TRACE(sys_sleep);
+    DMCP_TRACE(sys_sleep);
+
+    // The application may have asked to end itself (DB48X sets STAT_PGM_END and
+    // expects sys_sleep() not to return).
+    if (calc_state & STAT_PGM_END) {
+        dmcp_request_exit();
+    }
+    dmcp_leave_if_asked();
     // Sleep until either a key arrives, a DMCP timer expires, or 40 ms elapses
     uint32_t start = ll_get_time_ms();
     uint32_t max_wait = 40;
@@ -949,7 +963,7 @@ void sys_sleep(void) {
     }
 
     uint32_t elapsed = 0;
-    while (elapsed < max_wait && !backToDMCP) {
+    while (elapsed < max_wait && !dmcp_exit_requested()) {
         c47_poll_hardware_keys();
         if (c47_key_q_head != c47_key_q_tail) {
             break;
@@ -969,13 +983,13 @@ int is_menu_auto_off(void) {
 }
 
 void sys_reset(void) {
-    backToDMCP = 1;
+    dmcp_request_exit();
 }
 
 int run_menu_item_sys(uint8_t line_id) {
     if (line_id == MI_DMCP_MENU) {
         // Triggered if user invokes Activated System Menu -> return to ExistOS
-        backToDMCP = 1;
+        dmcp_request_exit();
         return MRET_EXIT;
     }
     return 0;
@@ -985,7 +999,7 @@ int run_menu_item_sys(uint8_t line_id) {
 static uint32_t c47_rtc_day_offset = 20749; // 2026-10-23 (days since 1970-01-01)
 
 void rtc_read(tm_t *tm, dt_t *dt) {
-    C47_TRACE(rtc_read);
+    DMCP_TRACE(rtc_read);
     uint32_t sec = ll_rtc_get_sec();
     uint32_t sod = sec % 86400u;
     uint32_t days = c47_rtc_day_offset + (sec / 86400u);
@@ -1053,7 +1067,7 @@ void rtc_wakeup_delay(void) {
 #define C47_DM_VBAT_FRESH  3100
 
 int get_vbat(void) {
-    C47_TRACE(get_vbat);
+    DMCP_TRACE(get_vbat);
     uint32_t mv = ll_get_bat_voltage();
 
     // Outside the plausible window the monitor is not reporting a cell at all (running
@@ -1127,12 +1141,12 @@ void printer_set_delay(uint val) {
 }
 
 char *aux_buf_ptr(void) {
-    C47_TRACE(aux_buf_ptr);
+    DMCP_TRACE(aux_buf_ptr);
     return c47_aux_buf;
 }
 
 void *write_buf_ptr(void) {
-    C47_TRACE(write_buf_ptr);
+    DMCP_TRACE(write_buf_ptr);
     return c47_write_buf;
 }
 
@@ -1151,7 +1165,7 @@ static void normalize_path(const char *in, char *out, size_t out_sz) {
 }
 
 int check_create_dir(const char *dir) {
-    C47_TRACE(check_create_dir);
+    DMCP_TRACE(check_create_dir);
     char path[64];
     normalize_path(dir, path, sizeof(path));
     FILINFO fno;
@@ -1167,7 +1181,7 @@ int sys_disk_write_enable(int val) {
 }
 
 int sys_is_disk_write_enable(void) {
-    C47_TRACE(sys_is_disk_write_enable);
+    DMCP_TRACE(sys_is_disk_write_enable);
     return c47_disk_write;
 }
 
@@ -1243,7 +1257,7 @@ int file_selection_screen(const char *title, const char *base_dir, const char *e
 
     int sel = 0;
     wait_for_key_release(-1);
-    while (!backToDMCP) {
+    while (!dmcp_exit_requested()) {
         lcd_clear_buf();
         lcd_setLine(t24, 0);
         ds_t24.inv = 1;
@@ -1297,12 +1311,12 @@ void set_reset_state_file(const char *str) {
 }
 
 char *get_reset_state_file(void) {
-    C47_TRACE(get_reset_state_file);
+    DMCP_TRACE(get_reset_state_file);
     return c47_reset_state_file;
 }
 
 int is_reset_state_file(void) {
-    C47_TRACE(is_reset_state_file);
+    DMCP_TRACE(is_reset_state_file);
     return (c47_reset_state_file[0] != '\0') ? 1 : 0;
 }
 
@@ -1368,7 +1382,142 @@ static const char *c47_menu_line_str_app(uint8_t line_id, char *s, const int sle
 static void c47_noop_cb(void) {
 }
 
-static void c47_init_sdb(void) {
+// ============================================================================
+// DMCP API that C47 did not use but DB48X does
+// ============================================================================
+
+int get_lowbat_state(void) {
+    // get_vbat() already maps the HP reading onto the DM42's scale and guards
+    // the out-of-window values this hardware produces; 2500 mV is DMCP's warning
+    // threshold on that scale.
+    return get_vbat() < 2500 ? 1 : 0;
+}
+
+uint32_t read_power_voltage(void) {
+    return get_vbat();
+}
+
+int sys_disk_ok(void) {
+    return 1;   // FatFs on the internal NAND is mounted for the whole session
+}
+
+// Days since 1 Jan 4713 BC. Fliegel & Van Flandern, as DMCP uses it.
+int julian_day(dt_t *dt) {
+    if (!dt) return 0;
+    int y = dt->year, m = dt->month, d = dt->day;
+    int a = (14 - m) / 12;
+    int yy = y + 4800 - a;
+    int mm = m + 12 * a - 3;
+    return (int)(d + (153 * mm + 2) / 5 + 365 * yy + yy / 4 - yy / 100 + yy / 400 - 32045);
+}
+
+const char *get_wday_shortcut(int day) {
+    // dmcp.h: 0 = Monday
+    static const char *const wd[7] = {"Mon","Tue","Wed","Thu","Fri","Sat","Sun"};
+    return wd[(unsigned)day % 7];
+}
+
+const char *get_month_shortcut(int month) {
+    static const char *const mo[13] = {"???","Jan","Feb","Mar","Apr","May","Jun",
+                                       "Jul","Aug","Sep","Oct","Nov","Dec"};
+    return mo[(month >= 1 && month <= 12) ? month : 0];
+}
+
+// DMCP's firmware menus and message boxes. ExistOS has its own UI and the
+// application reaches its own menus through softkeys, so these decline rather
+// than pretending: returning 0 sends the application back to its own screen.
+int handle_menu(const smenu_t *menu, int action, int cur_line) {
+    (void)menu; (void)action; (void)cur_line;
+    return 0;
+}
+
+void msg_box(disp_stat_t *ds, const char *txt, int inv) {
+    (void)ds; (void)inv;
+    if (txt) {
+        const char *lines[2] = { txt, "Press any key" };
+        dmcp_show_message(lines, 2);
+    }
+}
+
+int lcd_for_calc(int what) {
+    (void)what;     // DM42 screen-layout presets; this panel has its own adapter
+    return 0;
+}
+
+void lcd_switchFont(disp_stat_t *ds, int nr) {
+    if (ds) ds->f = (void *)(uintptr_t)nr;
+}
+
+void lcd_writeClr(disp_stat_t *ds) {
+    if (!ds) return;
+    ds->x = ds->y = 0;
+    ds->inv = 0;
+}
+
+void set_reset_magic(uint32_t value) {
+    (void)value;    // DMCP reboots into a chosen mode; OSLoader owns reset here
+}
+
+void sys_critical_start(void) { vTaskSuspendAll(); }
+void sys_critical_end(void)   { (void)xTaskResumeAll(); }
+
+// How much the application may take for its heap. Deliberately a budget, not
+// the real free heap: the VM keeps only ~40 KB of RAM resident and spills the
+// rest to NAND, so an application that takes everything thrashes. DB48X sizes
+// its RPL heap from this. Tune against OSLoader's VMRATE output - if nandrd/s
+// climbs into the hundreds the budget is too large, not too small.
+#ifndef DMCP_APP_HEAP_BUDGET
+#define DMCP_APP_HEAP_BUDGET (64 * 1024)
+#endif
+
+int sys_free_mem(void) {
+    return DMCP_APP_HEAP_BUDGET;
+}
+
+int __sysfn_read_key(int *k1, int *k2) {
+    int n = 0;
+    uint32_t keys = ll_vm_check_key();
+    if (k1) *k1 = 0;
+    if (k2) *k2 = 0;
+    if ((keys >> 16) & 0xFFFFu) {
+        int mapped = c47_map_39gii_key(keys & 0xFFFFu);
+        if (mapped > 0) {
+            if (k1) *k1 = mapped;
+            n = 1;
+        }
+    }
+    return n;
+}
+
+// ============================================================================
+// Shared application lifecycle
+// ============================================================================
+
+void dmcp_show_message(const char *const *lines, int count) {
+    if (!c47_strip_buf) return;
+    for (int sy0 = 0; sy0 < LCD_PIX_H; sy0 += C47_STRIP_ROWS) {
+        int sh = C47_STRIP_ROWS;
+        if (sy0 + sh > LCD_PIX_H) sh = LCD_PIX_H - sy0;
+        strip_fill_rect(c47_strip_buf, sy0, sh, 0, sy0, LCD_PIX_W, sh, C47_PAPER);
+        for (int i = 0; i < count; i++) {
+            strip_draw_str5x8(c47_strip_buf, sy0, sh, 4, 12 + i * 10,
+                              lines[i], C47_INK, C47_PAPER);
+        }
+        ll_disp_put_area(c47_strip_buf, 0, (uint32_t)sy0,
+                         LCD_PIX_W - 1, (uint32_t)(sy0 + sh - 1));
+    }
+    uint32_t last = ll_vm_check_key();
+    for (int i = 0; i < 400; i++) {
+        vTaskDelay(pdMS_TO_TICKS(50));
+        uint32_t k = ll_vm_check_key();
+        if (k != last) {
+            last = k;
+            if (k >> 16) break;
+        }
+    }
+}
+
+static void dmcp_init_sdb(void) {
     memset(&sdb, 0, sizeof(sdb));
     memset(&ds_t20, 0, sizeof(ds_t20));
     memset(&ds_t24, 0, sizeof(ds_t24));
@@ -1382,8 +1531,10 @@ static void c47_init_sdb(void) {
     timer2_counter = &c47_tim2_cnt;
     timer3_counter = &c47_tim3_cnt;
 
-    // Every callback C47 may dispatch through sdb must be non-NULL: an unset one
-    // is an indirect branch to a wild address, not a no-op.
+    // Every callback an application may dispatch through sdb must be non-NULL:
+    // an unset one is an indirect branch to a wild address, not a no-op. Assign
+    // through the macro names - dmcp.h #defines the bare field names to
+    // (sdb.<field>), so "sdb.set_flag_clk24 = x" preprocesses into nonsense.
     get_flag_dmy      = c47_get_flag_dmy;
     set_flag_dmy      = c47_set_flag_dmy;
     is_flag_clk24     = c47_is_flag_clk24;
@@ -1394,39 +1545,22 @@ static void c47_init_sdb(void) {
     menu_line_str_app = c47_menu_line_str_app;
     after_fat_format  = c47_noop_cb;
     msc_end_cb        = c47_noop_cb;
-
-#ifdef C47_DEBUG_TRACE
-    printf("C47: sdb=%p clk24=%p dmy=%p\n",
-           (void *)&sdb, (void *)set_flag_clk24, (void *)set_flag_dmy);
-#endif
 }
 
-static void c47_report_mem(const char *tag) {
-    printf("C47[%s]: heap=%08lx onchip=%luK/%luK swap=%luK/%luK\n",
-           tag,
-           (unsigned long)getHeapAddr(),
-           (unsigned long)(getOnChipHeapAllocated() / 1024),
-           (unsigned long)(OnChipMemorySize / 1024),
-           (unsigned long)(getSwapMemHeapAllocated() / 1024),
-           (unsigned long)(SwapMemorySize / 1024));
-}
+bool dmcp_run(const dmcp_app_t *app) {
+    bool ok = false;
 
-static void __attribute__((target("arm"))) c47_task(void *arg) {
-    (void)arg;
+    g_dmcp_app = app;
     SystemUISuspend();
 
-    uint32_t c47_stack_top = (uint32_t)(uintptr_t)&arg;
-    printf("C47: task entry, sp=%08lx\n", (unsigned long)c47_stack_top);
-    c47_report_mem("entry");
-
-    // C47 needs ~256 KB for its register/program RAM pool alone, far beyond the
-    // on-chip heap. Enable NAND-backed swap memory first, exactly as Emu48 does.
+    // These applications want far more RAM than the on-chip heap holds, so the
+    // NAND-backed swap heap has to be live before anything large is allocated.
     if (!MemorySwapEnable) {
         enableMemSwap(true);
-        printf("C47: memory swap enabled (%lu KB)\n", (unsigned long)(SwapMemorySize / 1024));
+        printf("%s: memory swap enabled (%lu KB)\n",
+               app->name, (unsigned long)(SwapMemorySize / 1024));
     }
 
-    // Ensure /SAVFILES and /PROGRAMS directories exist on FatFs
     f_mkdir("/SAVFILES");
     f_mkdir("/PROGRAMS");
 
@@ -1434,25 +1568,14 @@ static void __attribute__((target("arm"))) c47_task(void *arg) {
     c47_aux_buf     = (char *)pvPortMalloc(C47_AUX_BUF_BYTES);
     c47_write_buf   = (uint8_t *)pvPortMalloc(C47_WRITE_BUF_BYTES);
     c47_strip_buf   = (uint8_t *)pvPortMalloc(LCD_PIX_W * C47_STRIP_ROWS);
-    printf("C47: bufs lcd=%p aux=%p wr=%p strip=%p\n",
-           c47_raw_lcd_buf, c47_aux_buf, c47_write_buf, c47_strip_buf);
 
-    // Pre-allocate the C47 RAM pool here instead of letting doFnReset() do it, so a
-    // failure is reported rather than turning into a NULL memset inside the library.
-    if (c47_raw_lcd_buf && c47_aux_buf && c47_write_buf && c47_strip_buf && ram == NULL) {
-        ram = (uint32_t *)malloc(C47_RAM_POOL_BYTES);
-        printf("C47: ram pool (%lu bytes) = %p\n", (unsigned long)C47_RAM_POOL_BYTES, ram);
-        c47_report_mem("ram");
-    }
-
-    if (c47_raw_lcd_buf && c47_aux_buf && c47_write_buf && c47_strip_buf && ram) {
+    if (c47_raw_lcd_buf && c47_aux_buf && c47_write_buf && c47_strip_buf) {
         memset(c47_raw_lcd_buf, 0, C47_LCD_BUF_BYTES);
         memset(c47_aux_buf, 0, C47_AUX_BUF_BYTES);
         memset(c47_write_buf, 0, C47_WRITE_BUF_BYTES);
-        c47_init_sdb();
+        dmcp_init_sdb();
+
         key_pop_all();
-        inKeyBuffer(0);
-        clearKeyBuffer();
         c47_last_raw_keys  = ll_vm_check_key();
         c47_on_held        = false;
         c47_active_c47_key = 0;
@@ -1460,37 +1583,20 @@ static void __attribute__((target("arm"))) c47_task(void *arg) {
         memset(c47_systim_enabled, 0, sizeof(c47_systim_enabled));
 
         c47_banner_until_ms = ll_get_time_ms() + 1800;
-        strcpy(c47_banner_text, "C47: [APPS]=Keys [VIEWS]=Zoom");
+        snprintf(c47_banner_text, sizeof(c47_banner_text),
+                 "%s: [APPS]=Keys [VIEWS]=Zoom", app->name);
 
-        // Run C47 main loop (auto-loads /SAVFILES/c47auto.sav and saves on exit)
-        printf("C47: entering program_main()\n");
-        program_main();
-        printf("C47: program_main() returned\n");
-        c47_report_mem("exit");
-
-        // Free C47 core heap allocations so re-launching or running other apps has full RAM
-        if (ram) {
-            free(ram);
-            ram = NULL;
+        printf("%s: entering program_main()\n", app->name);
+        if (setjmp(g_dmcp_exit_jmp) == 0) {
+            app->run();
+            printf("%s: program_main() returned\n", app->name);
+        } else {
+            printf("%s: left via sys_sleep\n", app->name);
         }
-        if (globalRegister) {
-            free(globalRegister);
-            globalRegister = NULL;
-        }
-        if (freeMemoryRegions) {
-            free(freeMemoryRegions);
-            freeMemoryRegions = NULL;
-        }
-        if (glyphNotFound.data) {
-            free(glyphNotFound.data);
-            glyphNotFound.data = NULL;
-        }
+        ok = true;
     } else {
-        printf("C47: out of memory, aborting launch\n");
-        if (ram) { free(ram); ram = NULL; }
+        printf("%s: out of memory, aborting launch\n", app->name);
     }
-
-    printf("C47: task exit (sp top was %08lx)\n", (unsigned long)c47_stack_top);
 
     if (c47_strip_buf)   { vPortFree(c47_strip_buf);   c47_strip_buf   = NULL; }
     if (c47_write_buf)   { vPortFree(c47_write_buf);   c47_write_buf   = NULL; }
@@ -1499,9 +1605,6 @@ static void __attribute__((target("arm"))) c47_task(void *arg) {
 
     ll_disp_set_indicator(0, -1);
     SystemUIResume();
-    vTaskDelete(NULL);
-}
-
-void StartC47(void) {
-    xTaskCreate(c47_task, "C47", 12288, NULL, configMAX_PRIORITIES - 3, NULL);
+    g_dmcp_app = NULL;
+    return ok;
 }

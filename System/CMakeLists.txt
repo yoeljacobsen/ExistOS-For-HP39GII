@@ -5,6 +5,7 @@ include_directories(./core)
 include_directories(./drivers)
 include_directories(./graphics)
 include_directories(./utils)
+include_directories(./dmcp)
 include_directories(./kernel/scheduler/freertos/core)
 include_directories(./kernel/scheduler/freertos/port)
 include_directories(./third_party/freertos/include)
@@ -44,7 +45,9 @@ list(APPEND SYS_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/core/getentropy.c)
 #add_subdirectory(gb)
 #add_subdirectory(KLib)
 add_subdirectory(KLib/tjpgdec)
+add_subdirectory(dmcp)
 add_subdirectory(c47)
+add_subdirectory(db48x)
 add_subdirectory(applications/user/khicas)
 
 add_executable(sys.elf ${SYS_SRCS})
@@ -78,8 +81,17 @@ target_compile_options(sys.elf PRIVATE -mtune=arm926ej-s -mcpu=arm926ej-s -mlitt
 target_link_libraries(sys.elf -lm -lc -lrdimon -lgcc -lstdc++ -nostartfiles
 tjpgd
 #gb 
+# The DMCP applications, their cores and the shared platform layer refer to one
+# another in both directions (the cores call the DMCP API, the layer calls back
+# into the application), so they have to be resolved as a group rather than in
+# a single left-to-right pass.
+-Wl,--start-group
 c47
+db48x
 ${CMAKE_SOURCE_DIR}/Libs/libc47_core.libc
+${CMAKE_SOURCE_DIR}/Libs/libdb48x_core.libc
+dmcp
+-Wl,--end-group
 #lvgl
 ${CMAKE_SOURCE_DIR}/Libs/libkcasgui.libcpp
 #${CMAKE_SOURCE_DIR}/Libs/libmpy.libc

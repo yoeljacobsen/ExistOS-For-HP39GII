@@ -79,8 +79,8 @@
  build_c47.sh — Build Libs/libc47_core.a from C47EOF
  build_c47.sh — Build Libs/libc47_core.a from C47
  build_c47.sh — Build Libs/libc47_core.a from C47# Install ExistOS-adapted DMCP headers
- build_c47.sh — Build Libs/libc47_core.a from C47cp "${ROOT_DIR}/System/c47/dmcp.h"   "${GEN_DIR}/dmcp.h"
- build_c47.sh — Build Libs/libc47_core.a from C47cp "${ROOT_DIR}/System/c47/ff_ifc.h" "${GEN_DIR}/ff_ifc.h"
+ build_c47.sh — Build Libs/libc47_core.a from C47cp "${ROOT_DIR}/System/dmcp/dmcp.h"   "${GEN_DIR}/dmcp.h"
+ build_c47.sh — Build Libs/libc47_core.a from C47cp "${ROOT_DIR}/System/dmcp/ff_ifc.h" "${GEN_DIR}/ff_ifc.h"
  build_c47.sh — Build Libs/libc47_core.a from C47
  build_c47.sh — Build Libs/libc47_core.a from C47# Ensure graphText.c local FatFs text helpers are static so they don't collide with System/filesystem/fatfs/ff.c
  build_c47.sh — Build Libs/libc47_core.a from C47sed -i 's/^TCHAR\* f_gets/static TCHAR* f_gets/; s/^int f_putc /static int f_putc /; s/^int f_puts /static int f_puts /' \
@@ -142,4 +142,9 @@
  build_c47.sh — Build Libs/libc47_core.a from C47
  build_c47.sh — Build Libs/libc47_core.a from C47rm -f "${OUT_LIB}"
  build_c47.sh — Build Libs/libc47_core.a from C47arm-none-eabi-ar rcs "${OUT_LIB}" "${OBJ_DIR}"/*.o
+
+# Both core libraries define program_main(), the DMCP entry point, so they
+# cannot be linked into one binary as-is. Rename this one; System/*/\*_app.c
+# calls it by the new name.
+arm-none-eabi-objcopy --redefine-sym program_main=c47_program_main "${OUT_LIB}"
  build_c47.sh — Build Libs/libc47_core.a from C47echo "==> Successfully built ${OUT_LIB} ($(du -h "${OUT_LIB}" | cut -f1))"

@@ -26,8 +26,8 @@ OBJ_DIR="${WORK_DIR}/build_arm_objs"
 mkdir -p "${GEN_DIR}" "${OBJ_DIR}"
 
 # ExistOS-adapted DMCP headers, shared with C47.
-cp "${ROOT_DIR}/System/c47/dmcp.h"   "${GEN_DIR}/dmcp.h"
-cp "${ROOT_DIR}/System/c47/ff_ifc.h" "${GEN_DIR}/ff_ifc.h"
+cp "${ROOT_DIR}/System/dmcp/dmcp.h"   "${GEN_DIR}/dmcp.h"
+cp "${ROOT_DIR}/System/dmcp/ff_ifc.h" "${GEN_DIR}/ff_ifc.h"
 
 VERSION="$(git -C "${WORK_DIR}" describe --tags --always 2>/dev/null || echo existos)"
 
@@ -96,4 +96,30 @@ fi
 
 rm -f "${OUT_LIB}"
 arm-none-eabi-ar rcs "${OUT_LIB}" "${OBJ_DIR}"/*.o
+
+# Both core libraries define program_main(), the DMCP entry point, so they
+# cannot be linked into one binary as-is. Rename this one; System/*/\*_app.c
+# calls it by the new name.
+arm-none-eabi-objcopy --redefine-sym program_main=db48x_program_main "${OUT_LIB}"
+
+# DB48X and C47 are linked into one binary and both define a few globals under
+# the same name -- they were each written to be the only program on a DM42.
+# Rename DB48X's. --redefine-sym rewrites references inside the archive too, so
+# the library stays self-consistent.
+#
+# Recompute rather than hard-code: if a future DB48X or C47 adds another clash,
+# this reports it instead of failing at link time with a bare symbol name.
+C47_LIB="${ROOT_DIR}/Libs/libc47_core.libc"
+if [[ -f "${C47_LIB}" ]]; then
+    mapfile -t COLLISIONS < <(comm -12 \
+        <(arm-none-eabi-nm --defined-only "${C47_LIB}" | awk 'NF==3 && $2 ~ /[A-TV-Z]/ {print $3}' | sort -u) \
+        <(arm-none-eabi-nm --defined-only "${OUT_LIB}" | awk 'NF==3 && $2 ~ /[A-TV-Z]/ {print $3}' | sort -u))
+    if (( ${#COLLISIONS[@]} )); then
+        echo "==> Renaming ${#COLLISIONS[@]} symbol(s) that also exist in libc47_core:"
+        for sym in "${COLLISIONS[@]}"; do
+            echo "       ${sym} -> db48x_${sym}"
+            arm-none-eabi-objcopy --redefine-sym "${sym}=db48x_${sym}" "${OUT_LIB}"
+        done
+    fi
+fi
 echo "==> Successfully built ${OUT_LIB} ($(du -h "${OUT_LIB}" | cut -f1))"

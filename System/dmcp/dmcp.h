@@ -47,13 +47,15 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 typedef unsigned int uint;
 
-#include "ff_ifc.h"
-
-// The DMCP API is C. DB48X is C++ and declares these entry points extern "C",
-// so the header has to agree or the linkage conflicts.
+// The DMCP API is C, and so is the FatFs interface it exposes. DB48X is C++ and
+// declares these entry points extern "C", so the header has to agree or the
+// linkage conflicts. ff_ifc.h must be inside the block too, or f_open and
+// friends come out mangled.
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#include "ff_ifc.h"
 
 
 // ----------------------------------
