@@ -4,7 +4,13 @@ An open-source firmware replacement for the **HP 39gII Graphing Calculator** (Fr
 
 [![GPL Licence](https://badges.frapsoft.com/os/gpl/gpl.png?v=103)](https://opensource.org/licenses/GPL-3.0/)
 
-> **Architecture & Developer Reference:** See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for a deep-dive into the hardware, two-stage OSLoader/System hypervisor design, virtual memory manager (VROM/VRAM/ZRAM/Swap), Low-Level API (`LLAPI`), Emu48 Saturn emulator internals, and the improvement roadmap.
+> **Documentation:**
+> [`docs/PLATFORM.md`](./docs/PLATFORM.md) — hardware constraints that govern every design decision here (memory, keyboard, power, display) ·
+> [`docs/DESIGN.md`](./docs/DESIGN.md) — design of the native RPN/RPL application ·
+> [`docs/IMPLEMENTATION.md`](./docs/IMPLEMENTATION.md) — status, build/flash/debug workflow, continuation notes ·
+> [`docs/USAGE.md`](./docs/USAGE.md) — using the calculator and its applications
+>
+> **Architecture Reference:** See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for a deep-dive into the hardware, two-stage OSLoader/System hypervisor design, virtual memory manager (VROM/VRAM/ZRAM/Swap), Low-Level API (`LLAPI`), and the improvement roadmap.
 
 ---
 
@@ -16,7 +22,6 @@ ExistOS replaces the proprietary HP 39gII firmware with a modern two-stage opera
 - **[Dhara](https://github.com/dlbeer/dhara)** (NAND Flash Translation Layer with wear-leveling and bad-block management)
 - **[FatFs](http://elm-chan.org/fsw/ff/00index_e.html)** (FAT16 filesystem on internal NAND Flash)
 - **[KhiCAS / Giac](http://www-fourier.ujf-grenoble.fr/~parisse/giac.html)** (Computer Algebra System with Xcas and Python syntax modes)
-- **Emu48** (Saturn CPU emulator capable of running HP 39g / 40g / 48g / 49g calculator ROMs)
 - **[C47](https://gitlab.com/rpncalculators/c43)** (WP43-family RPN scientific calculator, built for ARM by `Libs/src/build_c47.sh`)
 
 ---
@@ -34,7 +39,6 @@ ExistOS replaces the proprietary HP 39gII firmware with a modern two-stage opera
 - [x] Demand-paged Virtual Memory (`VmMgr`) with 1 KB pages, MiniLZO compressed ZRAM, and NAND swap
 - [x] Graphical User Interface (`UICore`), Console (`SimpShell`), File Manager, and Persistent Settings (`SystemConfig`)
 - [x] KhiCAS Computer Algebra System (`Xcas` & `Python` modes, 2D/polar/field plotting, script editor)
-- [x] Emu48 Saturn Emulator (HP 39g ROM execution, state persistence to `/port0.39g` & `/port2.39g`, clean exit)
 - [x] C47 RPN Scientific Calculator (port of [C47](https://gitlab.com/rpncalculators/c43), the WP43-family DMCP5 firmware, with a 400x240 -> 256x127 anti-aliased display adapter)
 - [x] Native Linux build & deployment toolchain (`elftosb`, `sbloader`, `sysigner`, `edb`)
 
@@ -148,17 +152,23 @@ These shortcuts work anywhere in the OS (even if a user task hangs):
 - `ON` + `F5`: Open the OSLoader maintenance / format / reboot menu
 - `ON` + `F6`: Immediate reboot (when in Out-of-Memory or maintenance screen)
 - `ON` + `+` / `-`: Increase / decrease LCD contrast
-- `SHIFT` + `ON`: Shut down calculator
+- `SHIFT` + `ON`: Power off (on battery) or standby (while USB-powered — the PMU cannot keep the chip off with the 5 V rail up)
+- `Views`: Leave USB mass storage mode
 
 ### Accessing Internal Storage (USB Mass Storage Mode)
 Hold `F2` while booting (or select USB MSC mode from the `ON` + `F5` menu) and connect USB to your Linux PC. An ~80 MB FAT16 USB drive will mount containing:
 - `/xcas/`: KhiCAS scripts and saved sessions
+- `/SAVFILES/`, `/PROGRAMS/`: C47 saved state and programs
 - `/crash/`: Crash logs with register and stack dumps
 - `/existos_config.json`: Persistent system settings
-- `/rom.39g` (or `/rom.g39`): HP 39g ROM image for Emu48
-- `/port0.39g`, `/port2.39g`: Saved Emu48 RAM state
 
 Always safely unmount (`sync` / `udisksctl unmount`) before disconnecting so Dhara FTL flushes all blocks.
+
+### C47 RPN Scientific Calculator
+Select **C47** on the Application tab (`F1`) and press `ENTER`. See
+[`docs/USAGE.md`](./docs/USAGE.md) for the full key map; on the calculator itself,
+`APPS` shows a two-page keymap overlay and `VIEWS` cycles the display mode.
+`SHIFT` + `ON` leaves C47 and auto-saves.
 
 ### KhiCAS Computer Algebra System
 Select **KhiCAS** on the Application tab (`F1`) and press `ENTER`:
@@ -169,15 +179,6 @@ Select **KhiCAS** on the Application tab (`F1`) and press `ENTER`:
 - `F6` (`File`): Session management and Python/Xcas script editor.
 - `ON/C`: Clear history.
 - `SHIFT` + `ON/C`: Save session and return to ExistOS main UI.
-
-### Emu48 Saturn Calculator Emulator
-1. Copy an HP 39g ROM image (`rom.39g` or `rom.g39`, 1 MB) to the root directory of the calculator's FAT16 drive.
-2. Select **Emu48** on the Application tab (`F1`) and press `ENTER`.
-3. Shortcuts inside Emu48:
-   - `ON` + `F6`: Reboot emulated calculator
-   - `ON` + `F3`: Save RAM (`port0.39g`, `port2.39g`) and exit back to ExistOS UI
-
----
 
 ## Uninstalling ExistOS / Returning to Stock HP Firmware
 
