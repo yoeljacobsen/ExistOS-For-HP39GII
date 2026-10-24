@@ -506,7 +506,7 @@ void parseCDCCommand(char *cmd) {
         tud_disconnect();
         DisplayClean();
         DisplayPutStr(0, 0, "USB MSC Mode.", 0, 255, 16);
-        DisplayPutStr(0, 20, "Press [ON]+[Views] to exit", 0, 255, 16);
+        DisplayPutStr(0, 20, "Press [Views] to exit", 0, 255, 16);
         vTaskDelay(pdMS_TO_TICKS(200));
         g_MSC_Configuration = MSC_CONF_SYS_DATA;
         vTaskDelay(pdMS_TO_TICKS(10));
@@ -565,6 +565,25 @@ void tud_cdc_line_state_cb(uint8_t itf, bool dtr, bool rts) {
 }
 
 volatile bool g_req_poweroff = false;
+// Leaving the runtime MSC data mode. ON+Views goes through capt_ON_Key(), but in that
+// mode the USB console is dead and edb cannot see the device either, so a plain Views
+// press is also accepted - that is what the on-screen hint says, and it is the only
+// way out short of pulling the power.
+int msc_check_exit_key(int ck, int cp) {
+    if (g_MSC_Configuration != MSC_CONF_SYS_DATA || ck != KEY_VIEWS || !cp) {
+        return 0;
+    }
+    FTL_Sync();
+    tud_disconnect();
+    DisplayClean();
+    DisplayPutStr(0, 0, "Leaving USB MSC Mode.", 0, 255, 16);
+    vTaskDelay(pdMS_TO_TICKS(200));
+    g_MSC_Configuration = MSC_CONF_OSLOADER_EDB;
+    vTaskDelay(pdMS_TO_TICKS(10));
+    tud_connect();
+    return 1;
+}
+
 char cdc_path_loader_buffer[64];
 // Invoked when CDC interface received data from host
 void tud_cdc_rx_cb(uint8_t itf) {
@@ -922,6 +941,23 @@ void vBatteryMon(void *__n) {
         if (g_req_poweroff) {
             g_req_poweroff = false;
             portBoardPowerOff();
+        }
+
+        {
+            // Per-second fault rate, so it can be lined up against the emulator's
+            // opcode rate in the same log. A total is useless for that.
+            static uint32_t last_vram = 0, last_vrom = 0, last_rd = 0;
+            extern uint32_t g_mtd_read_cnt;
+            uint32_t dv = g_page_vram_fault_cnt - last_vram;
+            uint32_t dr = g_page_vrom_fault_cnt - last_vrom;
+            uint32_t dn = g_mtd_read_cnt - last_rd;
+            if (dv || dr || dn) {   // silent while nothing is paging
+                printf("VMRATE: vram=%lu/s vrom=%lu/s nandrd=%lu/s\n",
+                       (unsigned long)dv, (unsigned long)dr, (unsigned long)dn);
+            }
+            last_vram = g_page_vram_fault_cnt;
+            last_vrom = g_page_vrom_fault_cnt;
+            last_rd = g_mtd_read_cnt;
         }
 
         vatt_adc = portLRADCConvCh(7, 5);

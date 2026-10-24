@@ -29,6 +29,7 @@ QueueHandle_t keyQueue;
 uint32_t ck = 0, cp = 0;
 uint32_t key_notify = 0;
 int capt_ON_Key(int ck, int cp);
+int msc_check_exit_key(int ck, int cp);
 void key_task_capt()
 {
     int state = 0;
@@ -44,6 +45,10 @@ void key_task_capt()
         switch (state)
         {
         case 0:
+            if(msc_check_exit_key(ck, cp))
+            {
+                break;
+            }
             if(ck == KEY_ON && cp)
             {
                 state = 1;
