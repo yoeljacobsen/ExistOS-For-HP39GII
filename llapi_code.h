@@ -72,6 +72,7 @@
 
 #define LL_FAST_SWI_GET_CHARGE_STATUS     (LL_FAST_SWI_BASE + 82)
 #define LL_FAST_SWI_GET_VDD5V_PRESENT     (LL_FAST_SWI_BASE + 86)
+#define LL_SWI_DISP_SLEEP                 (LL_SWI_BASE + 87)
 #define LL_SWI_CHARGE_ENABLE              (LL_SWI_BASE + 83)
 #define LL_SWI_SLOW_DOWN_ENABLE              (LL_SWI_BASE + 84)
 #define LL_SWI_SLOW_DOWN_MINFRAC              (LL_SWI_BASE + 85)

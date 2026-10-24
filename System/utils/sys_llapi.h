@@ -68,6 +68,7 @@ DECDEF_LLSWI(uint32_t,     ll_get_core_temp,            (void)                  
 DECDEF_LLSWI(uint32_t,     ll_get_cur_freq,             (void)                                  ,LL_FAST_SWI_CORE_CUR_FREQ              );
 DECDEF_LLSWI(uint32_t,     ll_get_charge_status,        (void)                                  ,LL_FAST_SWI_GET_CHARGE_STATUS          );
 DECDEF_LLSWI(uint32_t,     ll_get_vdd5v_present,        (void)                                  ,LL_FAST_SWI_GET_VDD5V_PRESENT          );
+DECDEF_LLSWI(void,         ll_disp_sleep,               (uint32_t sleep)                        ,LL_SWI_DISP_SLEEP                      );
 DECDEF_LLSWI(uint32_t,     ll_charge_enable,            (bool enable)                           ,LL_SWI_CHARGE_ENABLE                   );
 DECDEF_LLSWI(uint32_t,     ll_cpu_slowdown_enable,      (int mode)                               ,LL_SWI_SLOW_DOWN_ENABLE             );
 DECDEF_LLSWI(uint32_t,     ll_cpu_slowdown_min_frac,    (uint32_t val)                          ,LL_SWI_SLOW_DOWN_MINFRAC               );

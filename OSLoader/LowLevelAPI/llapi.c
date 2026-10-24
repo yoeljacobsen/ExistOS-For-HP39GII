@@ -428,6 +428,11 @@ void __attribute__((target("thumb"))) LLAPI_Task_thumb_entry() {
                 *currentCall.pRet = tud_cdc_read_char();
             } break;
 
+            case LL_SWI_DISP_SLEEP: {
+                portDispSleep(currentCall.para0 ? true : false);
+                break;
+            }
+
             case LL_SWI_SET_KEY_REPORT: {
                 vm_key_input_enable = currentCall.para0;
             } break;

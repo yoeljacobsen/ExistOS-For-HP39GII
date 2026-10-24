@@ -28,6 +28,7 @@ void portDispReadBackVRAM(uint32_t x_start, uint32_t y_start, uint32_t x_end, ui
 void portDispSetIndicate(int indicateBit, int batteryBit);
 void portDispClean(void);
 void portDispSetContrast(uint8_t contrast);
+void portDispSleep(bool sleep);
 
 bool DisplayOperatesFin();
 void DisplayPrepareBatchIn(uint32_t x0, uint32_t y0, uint32_t x1, uint32_t y1);

@@ -531,6 +531,20 @@ void portDispSetContrast(uint8_t contrast) {
     LCDIF_DAT8(contrast & 0x7F);
 }
 
+void portDispSleep(bool sleep) {
+    // UC1698 takes the standard display-off / sleep-in pair. Blanking the framebuffer
+    // is not the same thing: on this STN panel a dark fill drives every pixel, so it
+    // costs more power than a lit screen, not less.
+    if (sleep) {
+        LCDIF_CMD8(0x28); // display off
+        LCDIF_CMD8(0x10); // sleep in
+    } else {
+        LCDIF_CMD8(0x11); // sleep out
+        portDelayus(120000);
+        LCDIF_CMD8(0x29); // display on
+    }
+}
+
 void portDispDeviceInit() {
     LCDIF_DMAChainsInit();
     LCDIF_EnableDMAChannel(true);

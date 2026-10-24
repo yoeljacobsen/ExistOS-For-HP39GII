@@ -425,6 +425,40 @@ void keyMsg(uint32_t key, int state) {
 
         case KEY_ON: {
             if (shift == 1) {
+                // With the 5 V rail up the PMU powers the chip straight back after a
+                // PWD, so a real power-down is not available while USB is connected --
+                // measured, and none of BRWNOUT_PWD, PWDN_BATTBRNOUT, masking the
+                // brownout or DISABLE_PSWITCH changes it. Do the next best thing the
+                // user actually wants from "off": blank the screen, drop the clock and
+                // wait for ON, which is what these calculators do anyway.
+                if (ll_get_vdd5v_present()) {
+                    shift = 0;
+                    ll_disp_set_indicator(0, -1);
+                    ll_disp_sleep(1);      // panel off, not a dark fill: on this STN a
+                                           // black screen drives every pixel
+                    ll_cpu_slowdown_enable(2);
+
+                    uint32_t last = ll_vm_check_key();
+                    for (;;) {
+                        vTaskDelay(pdMS_TO_TICKS(60));
+                        uint32_t k = ll_vm_check_key();
+                        if (k == last) {
+                            continue;
+                        }
+                        last = k;
+                        if ((k >> 16) && (k & 0xFFFF) == KEY_ON) {
+                            break;
+                        }
+                    }
+
+                    char ps = config_get_power_save();
+                    ll_cpu_slowdown_enable(ps == 'S' ? 1 : (ps == 'L' ? 2 : 0));
+                    ll_disp_sleep(0);
+                    refreshIndicator();
+                    drawPage(curPage);
+                    break;
+                }
+
                 uidisp->draw_box(0, 0, 255, 126, 255, 255);
                 uidisp->draw_bmp((char *)logo, 103, 32, 50, 25);
                 uidisp->draw_printf(128 - 14 * 6 / 2, 74, 12, 0, 255, "Shutting down");
