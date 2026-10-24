@@ -22,6 +22,11 @@ typedef struct {
     // user quits or the application powers itself off.
     volatile uint8_t *exit_flag;
 
+    // Pixel polarity of the 1bpp framebuffer. C47 blanks the screen to 0xFF and
+    // treats a clear bit as ink; DB48X follows the DM42, where "white is 0 and
+    // black is 1" (blitter.h). Getting this wrong inverts the whole display.
+    bool ink_is_set_bit;
+
     // True if the application's main loop never returns. DB48X loops forever
     // and relies on DMCP's sys_sleep() not coming back; C47 instead returns
     // from program_main() after saving its state, and must be allowed to.

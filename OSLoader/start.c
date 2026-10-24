@@ -565,6 +565,7 @@ void tud_cdc_line_state_cb(uint8_t itf, bool dtr, bool rts) {
 }
 
 volatile bool g_req_poweroff = false;
+extern bool transScr;
 // Leaving the runtime MSC data mode. ON+Views goes through capt_ON_Key(), but in that
 // mode the USB console is dead and edb cannot see the device either, so a plain Views
 // press is also accepted - that is what the on-screen hint says, and it is the only
@@ -622,6 +623,11 @@ void tud_cdc_rx_cb(uint8_t itf) {
                 goto fin;
             }
 
+            if (strcmp(cdc_path_loader_buffer, "scrcap") == 0) {
+                transScr = true;    // picked up by the main thread loop
+                goto fin;
+            }
+
             if (strcmp(cdc_path_loader_buffer, "pwrinfo") == 0) {
                 // Everything that decides whether a power-down sticks. PERSISTENT0 is
                 // in the always-on RTC domain and survives power cycles, so its
@@ -656,7 +662,7 @@ void tud_cdc_rx_cb(uint8_t itf) {
 }
 
 static bool eraseDataMenu = false;
-static bool transScr = false;
+bool transScr = false;
 static int contrast_adj = 0;
 
 void __attribute__((target("thumb"))) vMainThread_thumb_entry(void *pvParameters) {
@@ -803,26 +809,54 @@ void __attribute__((target("thumb"))) vMainThread_thumb_entry(void *pvParameters
 
         uint8_t *vramBuf;
         if (transScr) {
-            vTaskDelay(pdMS_TO_TICKS(1000));
+            // Stream the panel as raw 8-bit greyscale, bracketed by markers so a
+            // host can find it in the console stream. Switching to SCRCAP stops
+            // TaskUSBLog draining the log ring into the middle of the image; the
+            // previous path streamed rows in overlapping threes, which did not
+            // reconstruct.
+            uint32_t cdc_save = g_CDC_TransTo;
+            g_CDC_TransTo = CDC_PATH_SCRCAP;
+            vTaskDelay(pdMS_TO_TICKS(300));
 
-            vramBuf = pvPortMalloc(256 * 3);
+            #define SCRCAP_ROWS 4
+            vramBuf = pvPortMalloc(256 * SCRCAP_ROWS);
             if (!vramBuf) {
+                g_CDC_TransTo = cdc_save;
                 goto fin;
             }
 
-            for (int y = 0; y < 128; y += 2) {
-                bool fin;
-                DisplayReadArea(0, y, 255, y + 2, vramBuf, &fin);
-                while (!fin) {
-                    vTaskDelay(pdMS_TO_TICKS(30));
-                }
+            tud_cdc_write_str("\n<<SCRCAP 256x127>>\n");
+            tud_cdc_write_flush();
+            vTaskDelay(pdMS_TO_TICKS(20));
 
-                tud_cdc_write(vramBuf, 256 * 3);
-                tud_cdc_write_flush();
-                vTaskDelay(pdMS_TO_TICKS(15));
+            for (int y = 0; y < 127; y += SCRCAP_ROWS) {
+                int rows = (y + SCRCAP_ROWS > 127) ? (127 - y) : SCRCAP_ROWS;
+                bool rdfin;
+                DisplayReadArea(0, y, 255, y + rows - 1, vramBuf, &rdfin);
+                while (!rdfin) {
+                    vTaskDelay(pdMS_TO_TICKS(10));
+                }
+                int sent = 0;
+                while (sent < 256 * rows) {
+                    int ava = tud_cdc_write_available();
+                    if (ava <= 0) {
+                        tud_cdc_write_flush();
+                        vTaskDelay(pdMS_TO_TICKS(5));
+                        continue;
+                    }
+                    if (ava > 256 * rows - sent) {
+                        ava = 256 * rows - sent;
+                    }
+                    tud_cdc_write(vramBuf + sent, ava);
+                    tud_cdc_write_flush();
+                    sent += ava;
+                }
             }
 
+            tud_cdc_write_str("\n<<SCRCAPEND>>\n");
+            tud_cdc_write_flush();
             vPortFree(vramBuf);
+            g_CDC_TransTo = cdc_save;
 
         fin:
             vTaskDelay(pdMS_TO_TICKS(100));

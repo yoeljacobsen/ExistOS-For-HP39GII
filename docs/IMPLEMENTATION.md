@@ -64,7 +64,27 @@ with open(sys.argv[2], 'ab', 0) as f:
 ```
 
 Console commands (work in both CDC paths): `getstatus`, `pwrinfo`, `poweroff`,
-`clearall`. `pwrinfo` dumps the PMU and RTC-persistent registers.
+`clearall`, `scrcap`.
+
+**`scrcap` is the most useful of these.** It streams the panel as raw 8-bit
+greyscale between `<<SCRCAP 256x127>>` and `<<SCRCAPEND>>` markers, so the
+display can be looked at directly instead of described. While it streams,
+OSLoader switches to `CDC_PATH_SCRCAP` so the log task does not interleave into
+the image. Extract with:
+
+```python
+# /tmp/scrcap.py — writes /tmp/screen.pgm and prints an ASCII preview
+raw = open('/tmp/c47_serial.log','rb').read()
+b = raw.rfind(b'<<SCRCAP 256x127>>\n'); e = raw.rfind(b'\n<<SCRCAPEND>>')
+data = raw[b+19:e][:256*127]
+open('/tmp/screen.pgm','wb').write(b"P5\n256 127\n255\n" + data)
+ramp = " .:-=+*#%@"
+for y in range(0, 127, 3):
+    print("".join(ramp[(255-data[y*256+x])*9//255] for x in range(0, 256, 2)))
+```
+
+Debugging a display problem by description is slow and gets the wrong answer;
+capture the screen.
 
 **Careful:** `pkill -f <pattern>` matches the agent's own shell when the pattern
 appears in its command line. Match on `/proc/<pid>/cmdline` instead.

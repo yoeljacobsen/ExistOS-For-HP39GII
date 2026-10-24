@@ -89,6 +89,7 @@ static const dmcp_app_t c47_app = {
     .run        = c47_run,
     .indicators = c47_indicators,
     .exit_flag  = &backToDMCP,
+    .ink_is_set_bit = false,   // C47 blanks to 0xFF; a clear bit is ink
     .never_returns = false,   // C47 returns from program_main() after saving
 };
 

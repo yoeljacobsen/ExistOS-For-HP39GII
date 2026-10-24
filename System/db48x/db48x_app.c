@@ -33,6 +33,7 @@ static const dmcp_app_t db48x_app = {
     .run        = db48x_run,
     .indicators = db48x_indicators,
     .exit_flag  = &db48x_exit,
+    .ink_is_set_bit = true,    // DM42 convention: white 0, black 1
     .never_returns = true,
 };
 

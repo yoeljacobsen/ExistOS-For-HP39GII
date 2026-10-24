@@ -79,6 +79,9 @@ enum {
 
 const dmcp_app_t *g_dmcp_app = NULL;
 
+// Cached from the active application: read per pixel in the flush loop.
+static bool g_dmcp_ink_set = false;
+
 // DB48X's program_main() is an infinite loop: on a DM42 the firmware ends the
 // program from inside sys_sleep(). Reproduce that with a jump back into
 // dmcp_run(), so the platform layer's teardown still runs.
@@ -125,7 +128,15 @@ static uint32_t c47_tim3_cnt = 0;
 #define C47_WRITE_BUF_BYTES 4096           // 4,096 bytes
 #define C47_STRIP_ROWS      16             // 16 rows * 256 bytes = 4,096 bytes
 
-static uint8_t *c47_raw_lcd_buf = NULL;
+// Statically allocated, not on the heap: DB48X binds its framebuffer in a
+// global constructor --
+//     surface Screen((pixword *) lcd_line_addr(0), LCD_W, LCD_H, ...)
+// -- which runs from .init_array at System boot, long before any application
+// starts. A heap buffer does not exist yet at that point, so Screen captured a
+// null base and every draw faulted at address 0. The buffer is mostly zero
+// pages while idle, which cost nothing in ZRAM.
+static uint8_t c47_lcd_storage[C47_LCD_BUF_BYTES];
+static uint8_t *c47_raw_lcd_buf = c47_lcd_storage;
 static char    *c47_aux_buf     = NULL;
 static uint8_t *c47_write_buf   = NULL;
 static uint8_t *c47_strip_buf   = NULL;
@@ -189,7 +200,8 @@ static void c47_init_tables(void) {
 static inline int c47_px_black(const uint8_t *line_ptr, int cx) {
     int rx = (LCD_X - 1) - cx;
     uint8_t b = line_ptr[2 + (rx >> 3)];
-    return ((b >> (rx & 7)) & 1) == 0;
+    int bit = (b >> (rx & 7)) & 1;
+    return g_dmcp_ink_set ? bit : !bit;
 }
 
 // Draw a 5x8 ASCII string into the 256-pixel strip buffer (sy0..sy0+sh-1)
@@ -414,7 +426,7 @@ void lcd_clear_buf(void) {
         uint8_t *line_buf = &c47_raw_lcd_buf[row * 52];
         line_buf[0] = 1u;
         line_buf[1] = (uint8_t)(LCD_Y - 1 - row);
-        memset(&line_buf[2], 0xFF, 50);
+        memset(&line_buf[2], g_dmcp_ink_set ? 0x00 : 0xFF, 50);
     }
     c47_buf_cleared = 1;
 }
@@ -1551,6 +1563,7 @@ bool dmcp_run(const dmcp_app_t *app) {
     bool ok = false;
 
     g_dmcp_app = app;
+    g_dmcp_ink_set = app->ink_is_set_bit;
     SystemUISuspend();
 
     // These applications want far more RAM than the on-chip heap holds, so the
@@ -1564,13 +1577,12 @@ bool dmcp_run(const dmcp_app_t *app) {
     f_mkdir("/SAVFILES");
     f_mkdir("/PROGRAMS");
 
-    c47_raw_lcd_buf = (uint8_t *)pvPortMalloc(C47_LCD_BUF_BYTES);
     c47_aux_buf     = (char *)pvPortMalloc(C47_AUX_BUF_BYTES);
     c47_write_buf   = (uint8_t *)pvPortMalloc(C47_WRITE_BUF_BYTES);
     c47_strip_buf   = (uint8_t *)pvPortMalloc(LCD_PIX_W * C47_STRIP_ROWS);
 
-    if (c47_raw_lcd_buf && c47_aux_buf && c47_write_buf && c47_strip_buf) {
-        memset(c47_raw_lcd_buf, 0, C47_LCD_BUF_BYTES);
+    if (c47_aux_buf && c47_write_buf && c47_strip_buf) {
+        lcd_clear_buf();
         memset(c47_aux_buf, 0, C47_AUX_BUF_BYTES);
         memset(c47_write_buf, 0, C47_WRITE_BUF_BYTES);
         dmcp_init_sdb();
@@ -1601,7 +1613,6 @@ bool dmcp_run(const dmcp_app_t *app) {
     if (c47_strip_buf)   { vPortFree(c47_strip_buf);   c47_strip_buf   = NULL; }
     if (c47_write_buf)   { vPortFree(c47_write_buf);   c47_write_buf   = NULL; }
     if (c47_aux_buf)     { vPortFree(c47_aux_buf);     c47_aux_buf     = NULL; }
-    if (c47_raw_lcd_buf) { vPortFree(c47_raw_lcd_buf); c47_raw_lcd_buf = NULL; }
 
     ll_disp_set_indicator(0, -1);
     SystemUIResume();
