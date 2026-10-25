@@ -31,6 +31,11 @@ build_tools() {
 
     if [[ -f "${ROOT_DIR}/tools/edb-unix/CMakeLists.txt" ]]; then
         echo "  -> Building tools/edb-unix (edb)..."
+        # The submodule is upstream's; our flasher fixes (EOF handling, a
+        # divide-by-zero in the progress line) live in tools/edb-unix.patch.
+        if git -C "${ROOT_DIR}/tools/edb-unix" apply --check "${ROOT_DIR}/tools/edb-unix.patch" 2>/dev/null; then
+            git -C "${ROOT_DIR}/tools/edb-unix" apply "${ROOT_DIR}/tools/edb-unix.patch"
+        fi
         cmake -S "${ROOT_DIR}/tools/edb-unix" -B "${ROOT_DIR}/tools/edb-unix/build"
         cmake --build "${ROOT_DIR}/tools/edb-unix/build" -j"$(nproc)"
         cp -f "${ROOT_DIR}/tools/edb-unix/build/edb" "${ROOT_DIR}/tools/edb"

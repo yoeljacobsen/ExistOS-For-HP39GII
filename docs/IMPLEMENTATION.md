@@ -296,7 +296,8 @@ second. `dmcp_run()` clears it on entry.
 Driven and verified from the host with `key` + `scrcap`. Working: launch,
 inverse-video header, hardware annunciators, editor line, **stack values**
 (`1 ENTER 2 +` -> 3, `4 ENTER 5 x` -> 20, long decimals with digit grouping),
-exit and relaunch, softkey menus (e.g. `MATH`).
+exit and relaunch, softkey menus (e.g. `MATH`), and online help (`SYMB` ->
+`F1`, once the help files are copied to `/help/` -- see USAGE.md).
 
 ### The unaligned-surface bug
 

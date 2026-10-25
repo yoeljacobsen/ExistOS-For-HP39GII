@@ -1,0 +1,38 @@
+diff --git a/EDBInterface.cpp b/EDBInterface.cpp
+index 5f5a3c8..b0a6fd8 100755
+--- a/EDBInterface.cpp
++++ b/EDBInterface.cpp
+@@ -146,6 +146,9 @@ int EDBInterface::flash(flashImg item) {
+         memset(cmdbuf, 0, 64);
+ 
+         cnt = fread(sendBuf, 1, BIN_BLOB_SIZE, item.f);
++        if (cnt == 0) {
++            break;
++        }
+         chksum = blockChksum(sendBuf, BIN_BLOB_SIZE);
+ 
+         this->wrDat(sendBuf, BIN_BLOB_SIZE);
+@@ -180,14 +183,15 @@ int EDBInterface::flash(flashImg item) {
+             return false;
+         }
+ 
+-        if (page_cnt % 200 == 0) {
+-            long long speed = BIN_BLOB_SIZE / (getTime() - st);
+-            cout << "Upload: " << ftell(item.f) << "/" << fsize;
+-            cout << " Page: " << page_cnt << " Block: " << block_cnt;
+-            printf("  chksum: %02x==%02x, %lld KB/s", chksum, rcshkdum, speed);
+-            cout << "  " << (fsize - ftell(item.f)) / speed / 1000 << "s remaining        \r";
+-            fflush(stdout);
+-        }
++        long long elapsed = getTime() - st;
++        if (elapsed <= 0) elapsed = 1;
++        long long speed = BIN_BLOB_SIZE / elapsed;
++        if (speed <= 0) speed = 1;
++        cout << "Upload: " << ftell(item.f) << "/" << fsize;
++        cout << " Page: " << page_cnt << " Block: " << block_cnt;
++        printf("  chksum: %02x==%02x, %lld KB/s", chksum, rcshkdum, speed);
++        cout << "  " << (fsize - ftell(item.f)) / speed / 1000 << "s remaining        \r";
++        fflush(stdout);
+ 
+         page_cnt += BIN_BLOB_SIZE / 2048;
+         last_block = block_cnt;
