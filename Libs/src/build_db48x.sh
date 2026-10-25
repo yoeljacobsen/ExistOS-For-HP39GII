@@ -71,6 +71,14 @@ extern "C" int db48x_ui_state(int *stack_top)
         *stack_top = ui.stack_screen_top();
     return (int) ((ui.shift_plane() & 3) | ((ui.alpha_plane() & 3) << 2));
 }
+
+extern "C" void db48x_ui_geometry(int *top, int *bottom, int *menu, int *depth)
+{
+    if (top)    *top    = ui.stack_screen_top();
+    if (bottom) *bottom = ui.stack_screen_bottom();
+    if (menu)   *menu   = ui.menu_screen_bottom();
+    if (depth)  *depth  = (int) rt.depth();
+}
 ACCESSOR
 fi
 

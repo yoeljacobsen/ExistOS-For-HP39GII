@@ -1652,8 +1652,15 @@ static TaskHandle_t c47_disp_task = NULL;
 // attribute; omitting it crashed DB48X the moment the task was scheduled.
 static void __attribute__((target("arm"))) c47_display_task(void *arg) {
     (void)arg;
+    uint32_t idle = 0;
     for (;;) {
-        if (g_dmcp_lines_dirty) {
+        // Dirty means something was drawn. The periodic flush covers everything
+        // else: a banner expiring, a frame the application finished after the
+        // last flush, anything that changes without the application telling us.
+        // A stale panel is far more confusing to debug than the few percent of
+        // CPU this costs.
+        if (g_dmcp_lines_dirty || ++idle >= 8) {
+            idle = 0;
             c47_flush_screen();     // clears the flag itself
         }
         vTaskDelay(pdMS_TO_TICKS(60));

@@ -566,6 +566,39 @@ void tud_cdc_line_state_cb(uint8_t itf, bool dtr, bool rts) {
 
 volatile bool g_req_poweroff = false;
 extern bool transScr;
+
+// Injected key events, for driving the calculator from the USB console. The
+// physical scan only writes g_latest_key_status when a key actually changes, so
+// a value written here survives until the next real press. Press and release
+// have to be paced apart or the System's 20 ms poll never sees the press.
+#define KEYINJ_QUEUE 16
+static volatile uint8_t  keyinj_buf[KEYINJ_QUEUE];
+static volatile uint32_t keyinj_head = 0, keyinj_tail = 0;
+
+static void keyinj_push(uint8_t code) {
+    uint32_t next = (keyinj_tail + 1) % KEYINJ_QUEUE;
+    if (next != keyinj_head) {
+        keyinj_buf[keyinj_tail] = code;
+        keyinj_tail = next;
+    }
+}
+
+void __attribute__((target("arm"))) vKeyInjectTask(void *_) {
+    extern volatile uint32_t g_latest_key_status;
+    for (;;) {
+        if (keyinj_head != keyinj_tail) {
+            uint8_t code = keyinj_buf[keyinj_head];
+            keyinj_head = (keyinj_head + 1) % KEYINJ_QUEUE;
+
+            g_latest_key_status = (1u << 16) | code;
+            vTaskDelay(pdMS_TO_TICKS(120));
+            g_latest_key_status = (0u << 16) | code;
+            vTaskDelay(pdMS_TO_TICKS(180));
+        } else {
+            vTaskDelay(pdMS_TO_TICKS(20));
+        }
+    }
+}
 // Leaving the runtime MSC data mode. ON+Views goes through capt_ON_Key(), but in that
 // mode the USB console is dead and edb cannot see the device either, so a plain Views
 // press is also accepted - that is what the on-screen hint says, and it is the only
@@ -620,6 +653,19 @@ void tud_cdc_rx_cb(uint8_t itf) {
             if (strcmp(cdc_path_loader_buffer, "clearall") == 0) {
                 FTL_ClearAllSector();
                 printf("clear all sector.\n");
+                goto fin;
+            }
+
+            // "key 12 12 76" taps each of those Keys_t codes in turn.
+            if (strncmp(cdc_path_loader_buffer, "key ", 4) == 0) {
+                const char *p = cdc_path_loader_buffer + 4;
+                while (*p) {
+                    while (*p == ' ') p++;
+                    if (*p < '0' || *p > '9') break;
+                    int v = 0;
+                    while (*p >= '0' && *p <= '9') v = v * 10 + (*p++ - '0');
+                    if (v >= 0 && v < 256) keyinj_push((uint8_t)v);
+                }
                 goto fin;
             }
 
@@ -1141,6 +1187,7 @@ volatile void _startup() {
     xTaskCreate(vDispSvc, "Display Svc", configMINIMAL_STACK_SIZE, NULL, configMAX_PRIORITIES - 1, &pDispTask);
 
     xTaskCreate(TaskUSBLog, "USB Log", configMINIMAL_STACK_SIZE, NULL, configMAX_PRIORITIES - 7, &pUSBLOGTask);
+    xTaskCreate(vKeyInjectTask, "KeyInj", configMINIMAL_STACK_SIZE, NULL, configMAX_PRIORITIES - 6, NULL);
     xTaskCreate(vTaskTinyUSB, "TinyUSB", configMINIMAL_STACK_SIZE, NULL, configMAX_PRIORITIES - 4, NULL);
 
     xTaskCreate(vVMMgrSvc, "VM Svc", configMINIMAL_STACK_SIZE, NULL, configMAX_PRIORITIES - 4, NULL);

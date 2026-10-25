@@ -24,6 +24,7 @@ static volatile uint8_t db48x_exit = 0;
 // (0 none, 1 shift, 2 xshift) and alpha plane in bits 2-3 (0 none, 1 upper,
 // 2 lower), and reports where the stack area begins.
 int db48x_ui_state(int *stack_top);
+void db48x_ui_geometry(int *top, int *bottom, int *menu, int *depth);
 
 static int db48x_indicators(void) {
     int st = db48x_ui_state(NULL);
@@ -46,8 +47,16 @@ static int db48x_indicators(void) {
 // own annunciator row, which costs no pixels, so the header is redundant here
 // and the display layer can drop it on request.
 static int db48x_content_top(void) {
-    int top = 0;
-    (void)db48x_ui_state(&top);
+    int top = 0, bottom = 0, menu = 0, depth = 0;
+    db48x_ui_geometry(&top, &bottom, &menu, &depth);
+    {
+        static int last_depth = -1;
+        if (depth != last_depth) {
+            last_depth = depth;
+            printf("DB48X geom: stack %d..%d menu_bottom=%d depth=%d\n",
+                   top, bottom, menu, depth);
+        }
+    }
     return top;
 }
 

@@ -66,6 +66,22 @@ with open(sys.argv[2], 'ab', 0) as f:
 Console commands (work in both CDC paths): `getstatus`, `pwrinfo`, `poweroff`,
 `clearall`, `scrcap`.
 
+**`key` and `scrcap` together make a closed debugging loop** — the calculator can
+be driven and observed entirely from the host, with no human at the keypad.
+
+`key <code> <code> ...` taps each `Keys_t` code in turn (`(row << 3) + col`,
+see `System/core/keyboard_gii39.h`). A dedicated OSLoader task paces press and
+release 120 ms apart, because the System polls keys every 20 ms and anything
+faster is missed. The physical scan only writes `g_latest_key_status` when a key
+actually changes, so an injected value survives until the next real press.
+
+Useful codes: `RIGHT` 12, `LEFT` 20, `UP` 4, `DOWN` 28, `ENTER` 76, `ON` 80,
+`VIEWS` 18, `APPS` 25, `0`–`1` 72–73, `2`–`3` 66–67, `+` 68.
+From the launcher, `key 12 12 76` starts DB48X.
+
+`/tmp/shot.sh [codes...]` taps the codes then captures, writing a 3x PNG to
+`/tmp/db48x_screen.png`.
+
 **`scrcap` is the most useful of these.** It streams the panel as raw 8-bit
 greyscale between `<<SCRCAP 256x127>>` and `<<SCRCAPEND>>` markers, so the
 display can be looked at directly instead of described. While it streams,
@@ -274,6 +290,38 @@ and never cleared. C47 clears its own `backToDMCP` at the top of
 `program_main()`, but an application whose main loop never returns has no such
 moment, so the next launch saw the flag already set and quit within half a
 second. `dmcp_run()` clears it on entry.
+
+## DB48X: where the display stands
+
+Driven and captured from the host. Working: launch, header (inverse-video bar
+with date/time and battery), hardware annunciators, the editor/input line, the
+stack separator and level markers, exit, relaunch. The periodic flush means the
+panel is never stale.
+
+**Not working: stack values and the softkey menu never render.** The geometry is
+sane and the value exists --
+
+    DB48X geom: stack 28..240 menu_bottom=0 depth=1
+
+-- so after `1 ENTER` the runtime holds one object and the stack region is the
+whole screen below the header, yet a capture of that area contains only the
+vertical separator at source x~28 and a level marker. The editor line renders
+with the same font moments earlier, so it is not fonts, polarity or geometry.
+`menu_screen_bottom() == 0` says the menu has never been laid out either.
+
+Hypotheses not yet tested, in the order worth trying:
+
+1. `Settings` is zero-initialised because its global constructor is not in the
+   linked `.init_array`. That would make foreground and background identical --
+   invisible text -- and a zero menu height, while the header still draws
+   because it uses the explicit Header* colours. `.ctors` holds 61 entries and
+   `System/core/init.c` does run them, so check whether DB48X's
+   `_GLOBAL__sub_I_*` for `settings.cc` is among them. Note the build renames
+   `Settings` to `db48x_Settings` to avoid colliding with C47's.
+2. Rendering a value needs scratch from the RPL arena; if that fails the draw
+   may silently produce nothing. Log `rt.error()` after a render.
+3. `ui.draw_stack()` partially succeeds -- furniture yes, text no -- so
+   instrument it rather than reasoning about it.
 
 ## Next steps
 
