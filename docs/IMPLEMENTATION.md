@@ -296,7 +296,7 @@ second. `dmcp_run()` clears it on entry.
 Driven and verified from the host with `key` + `scrcap`. Working: launch,
 inverse-video header, hardware annunciators, editor line, **stack values**
 (`1 ENTER 2 +` -> 3, `4 ENTER 5 x` -> 20, long decimals with digit grouping),
-exit and relaunch.
+exit and relaunch, softkey menus (e.g. `MATH`).
 
 ### The unaligned-surface bug
 
@@ -320,9 +320,13 @@ answers.**
 
 ### Still open
 
-- **No softkey menu.** `menu_screen_bottom()` reports 0: the menu has never been
-  laid out. With the alignment fix in, this is the next thing to look at.
 - The input line sits at the very bottom and can clip in the 240 -> 127 scale.
+- DB48X shows all three shift planes of the softkey menu at once (three rows),
+  which costs a lot of a 127-row panel; consider a single-plane menu setting.
+
+The softkey menu itself works: `menu_screen_bottom()` is 0 only while no menu is
+active (and the geometry log prints only when stack depth changes, so it can be
+stale). `MATH` brings up the three-plane bar correctly.
 
 ## Next steps
 
