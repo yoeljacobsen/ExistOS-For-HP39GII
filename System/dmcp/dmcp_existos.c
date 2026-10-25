@@ -1650,6 +1650,27 @@ static TaskHandle_t c47_disp_task = NULL;
 // task-start path does not interwork, so a Thumb entry is executed as ARM and
 // faults on its first instruction. Every other task here carries the same
 // attribute; omitting it crashed DB48X the moment the task was scheduled.
+#ifdef DMCP_DEBUG_TRACE
+// Prints where the application task is every second. A hang in the application
+// is a spin, not a fault, so there is no register dump to read; the context the
+// scheduler saved at the last tick is the next best thing. Frame layout from
+// pxTopOfStack (port.c / portSAVE_CONTEXT): nesting, SPSR, R0..R14, PC.
+// Resolve with addr2line on sys.elf.
+static TaskHandle_t dmcp_sampler_task = NULL;
+
+// target("arm"): this port starts every task in ARM state (see c47_display_task).
+static void __attribute__((target("arm"))) dmcp_sampler(void *arg) {
+    TaskHandle_t app_task = (TaskHandle_t)arg;
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        const uint32_t *f = *(uint32_t *const *)app_task;   // TCB starts with pxTopOfStack
+        printf("DMCP sample: pc=%08lx lr=%08lx sp=%08lx spsr=%08lx\n",
+               (unsigned long)f[17], (unsigned long)f[16],
+               (unsigned long)f[15], (unsigned long)f[1]);
+    }
+}
+#endif
+
 static void __attribute__((target("arm"))) c47_display_task(void *arg) {
     (void)arg;
     uint32_t idle = 0;
@@ -1723,6 +1744,10 @@ bool dmcp_run(const dmcp_app_t *app) {
 
         xTaskCreate(c47_display_task, "dmcpDisp", 512, NULL,
                     configMAX_PRIORITIES - 4, &c47_disp_task);
+#ifdef DMCP_DEBUG_TRACE
+        xTaskCreate(dmcp_sampler, "dmcpSmpl", 256, xTaskGetCurrentTaskHandle(),
+                    configMAX_PRIORITIES - 2, &dmcp_sampler_task);
+#endif
 
         printf("%s: entering program_main()\n", app->name);
         if (setjmp(g_dmcp_exit_jmp) == 0) {
@@ -1736,6 +1761,12 @@ bool dmcp_run(const dmcp_app_t *app) {
         printf("%s: out of memory, aborting launch\n", app->name);
     }
 
+#ifdef DMCP_DEBUG_TRACE
+    if (dmcp_sampler_task) {
+        vTaskDelete(dmcp_sampler_task);
+        dmcp_sampler_task = NULL;
+    }
+#endif
     if (c47_disp_task) {
         vTaskDelete(c47_disp_task);
         c47_disp_task = NULL;

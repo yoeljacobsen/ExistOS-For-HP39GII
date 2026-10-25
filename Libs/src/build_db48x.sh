@@ -16,6 +16,11 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WORK_DIR="${DB48X_SRC_DIR:-/tmp/db48x-build}"
 OUT_LIB="${ROOT_DIR}/Libs/libdb48x_core.libc"
 
+# Distribution arm-none-eabi packages often ship without libstdc++ headers
+# (<cstdint> missing); prefer the full GNU Arm toolchain when it is installed.
+ARM_TOOLCHAIN="${ARM_TOOLCHAIN:-${HOME}/.local/opt/gcc-arm-none-eabi-10.3-2021.10/bin}"
+[[ -x "${ARM_TOOLCHAIN}/arm-none-eabi-g++" ]] && export PATH="${ARM_TOOLCHAIN}:${PATH}"
+
 echo "==> Preparing DB48X source tree in ${WORK_DIR}..."
 if [[ ! -d "${WORK_DIR}/.git" ]]; then
     git clone --depth 1 https://github.com/c3d/db48x.git "${WORK_DIR}"
@@ -89,6 +94,64 @@ if "existos_origin" not in s:
         offset   existos_origin; // Bits from pixels to the real start (ExistOS)""")
     open(p, 'w').write(s)
 BLITPATCH
+
+# The DM42 firmware carries its own bitmap fonts (lib_mono, skr_mono, Free42),
+# and DB48X reaches them through dmcp_font, which calls lcd_switchFont() and
+# reads the line_font_t it selects. There are no such fonts here -- our
+# lcd_switchFont() cannot hand back a real table -- so every glyph read from a
+# dmcp_font dereferences garbage. The HeaderFont default above was one route in;
+# draw_message() is another: it hard-codes LibMonoFont10x17, so the first error
+# or progress box (e.g. "√" of a stack value, following a help link) faulted in
+# dmcp_font::glyph. Substitute DB48X's own compiled-in fonts by size instead.
+python3 - "${WORK_DIR}/src/font.cc" <<'FONTPATCH'
+import sys
+p = sys.argv[1]; s = open(p).read()
+if "existos_dmcp_substitute" not in s:
+    helper = """static font_p existos_dmcp_substitute(int index)
+// ----------------------------------------------------------------------------
+//   HP 39gII port: no DMCP fonts exist, so pick a DB48X font of similar size
+// ----------------------------------------------------------------------------
+{
+    switch (index)
+    {
+    case 2: case 3: case 21:    return ReducedFont;   // lib_mono 12x20, 14x22, skr 18x24
+    case 4: case 5:             return StackFont;     // lib_mono 17x25, 17x28
+    default:                    return HelpFont;      // smaller lib_mono, Free42, skr 13x18
+    }
+}
+
+
+"""
+    old_h = "font::fuint dmcp_font::height()\n"
+    old_g = "bool dmcp_font::glyph(unicode utf8cp, glyph_info &g) const\n"
+    assert old_h in s and old_g in s
+    s = s.replace(old_h, helper + old_h, 1)
+    s = s.replace("""{
+    // Switch to the correct DMCP font
+    int fontnr = index();""", """{
+    return existos_dmcp_substitute(index())->height();
+
+    // Switch to the correct DMCP font
+    int fontnr = index();""", 1)
+    s = s.replace("""{
+    // Map Unicode code points to corresonding entry in DMCP charset""", """{
+    return existos_dmcp_substitute(index())->glyph(utf8cp, g);
+
+    // Map Unicode code points to corresonding entry in DMCP charset""", 1)
+    assert s.count("existos_dmcp_substitute(index())") == 2, "dmcp_font patch did not apply"
+    open(p, "w").write(s)
+FONTPATCH
+
+# Decimal arithmetic builds its base-1000 digits ("kigits", uint16_t) in the
+# scratchpad, which hands out bytes at any offset, then reads them back through
+# kint pointers. On an odd address the ARM926 ignores bit 0 of a halfword
+# access instead of faulting, so every such load and store hit the wrong
+# halfword: "1.5" ENTER showed 0., 1.5/3 gave 7.705..., and the Newton loop in
+# sqrt never converged, so the calculator hung. A typedef may lower alignment;
+# with aligned(1) GCC emits byte accesses for every kint dereference.
+sed -i 's|^    using kint = uint16_t;|    typedef uint16_t kint __attribute__((aligned(1)));|' "${WORK_DIR}/src/decimal.h"
+grep -q "typedef uint16_t kint __attribute__((aligned(1)))" "${WORK_DIR}/src/decimal.h" \
+    || { echo "ERROR: kint alignment patch did not apply"; exit 1; }
 grep -q "existos_origin" "${WORK_DIR}/src/blitter.h" || { echo "ERROR: alignment patch did not apply"; exit 1; }
 
 # Expose the bits the ExistOS port needs from DB48X's UI, with C linkage. The

@@ -296,7 +296,8 @@ second. `dmcp_run()` clears it on entry.
 Driven and verified from the host with `key` + `scrcap`. Working: launch,
 inverse-video header, hardware annunciators, editor line, **stack values**
 (`1 ENTER 2 +` -> 3, `4 ENTER 5 x` -> 20, long decimals with digit grouping),
-exit and relaunch, softkey menus (e.g. `MATH`), and online help (`SYMB` ->
+exit and relaunch, decimal arithmetic (`1.5 3 /` -> 0.5, `2 sqrt` ->
+1.41421356237...), error message boxes, softkey menus (e.g. `MATH`), and online help (`SYMB` ->
 `F1`, once the help files are copied to `/help/` -- see USAGE.md).
 
 ### The unaligned-surface bug
@@ -318,6 +319,46 @@ helpers every word/bit lookup goes through -- `pixel_address()` and
 `pixel_shift()` -- add it. Any other code ported from a Cortex-M target deserves
 the same suspicion: **this CPU does not fault on unaligned access, it gives wrong
 answers.**
+
+### Unaligned halfwords: decimal arithmetic
+
+The same CPU property broke decimal numbers. With A=0 the ARM926 does not
+rotate a halfword access at an odd address, it **ignores bit 0** and touches the
+neighbouring aligned halfword. DB48X builds a decimal's base-1000 digits
+(`kint`, `uint16_t`) in the scratchpad, which hands out bytes at any offset,
+and reads them back through `kint *`. Symptoms: `1.5 ENTER` showed `0.`,
+`1.5 3 /` gave `7.705...`, and `sqrt` hung forever because its Newton loop
+never converged on garbage (no fault, so the only clue was the PC sampler
+below). `build_db48x.sh` redeclares `kint` as
+`typedef uint16_t kint __attribute__((aligned(1)))`; a typedef may lower
+alignment, and GCC then emits byte accesses for every `kint` dereference. GCC
+drops the attribute on template arguments (`gcp<kint>`, `-Wignored-attributes`),
+which is harmless here because every such value is turned back into a
+`const kint *` before it is read.
+
+A general fix would set the CP15 A bit and emulate unaligned accesses in the
+data-abort handler, as Linux does on ARMv5. Not done yet: the handler would
+have to page in non-resident pages first (an alignment fault is reported before
+a translation fault, and a nested abort inside the handler cannot be served).
+
+### DMCP fonts do not exist here
+
+DB48X can draw with the DM42 firmware's own fonts (`dmcp_font`, reached via
+`lcd_switchFont()`). This port has none, so every glyph read through one used a
+garbage `line_font_t`. `user_interface::draw_message()` hard-codes
+`LibMonoFont10x17`, so the first error or progress box crashed in
+`dmcp_font::glyph`. `build_db48x.sh` makes `dmcp_font::glyph()` and `height()`
+delegate to DB48X's compiled-in fonts by size (`existos_dmcp_substitute`).
+
+### Finding a hang: the PC sampler
+
+With `DMCP_DEBUG_TRACE`, `dmcp_run()` starts `dmcpSmpl`, a task above the app's
+priority that prints the app task's saved context every second:
+`DMCP sample: pc=... lr=... sp=... spsr=...` (frame layout from
+`pxTopOfStack`: nesting, SPSR, R0..R14, PC). Resolve with addr2line. Idle DB48X
+sits in `vTaskDelay`. Any task entry point must be `target("arm")`: this
+FreeRTOS port starts every task in ARM state, and a Thumb entry dies with
+`[UND]` and registers still holding the 0x01010101 fill pattern.
 
 ### Still open
 
