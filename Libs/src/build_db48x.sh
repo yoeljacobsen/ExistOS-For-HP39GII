@@ -208,4 +208,14 @@ if [[ -f "${C47_LIB}" ]]; then
         done
     fi
 fi
+# Online help is not compiled in: DB48X reads HELPFILE_NAME and a byte-offset
+# index HELPINDEX_NAME from the filesystem at runtime. Produce both, exactly as
+# DB48X's Makefile does, so they can be copied to /help/ on the calculator.
+HELP_OUT="${ROOT_DIR}/build/db48x-help"
+mkdir -p "${HELP_OUT}"
+cp "${WORK_DIR}/help/db48x.md" "${HELP_OUT}/db48x.md"
+grep -b '^#\|^\* `[^`]*`' "${HELP_OUT}/db48x.md" \
+    | sed -e 's/:\(\* `[^`]*`\).*/:\1/g' | LC_ALL=C sort -k2 -t: > "${HELP_OUT}/db48x.idx"
+echo "==> Help files for /help/ on the calculator: ${HELP_OUT}/db48x.{md,idx}"
+
 echo "==> Successfully built ${OUT_LIB} ($(du -h "${OUT_LIB}" | cut -f1))"

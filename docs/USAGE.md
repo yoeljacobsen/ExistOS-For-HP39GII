@@ -76,6 +76,18 @@ every function and menu. g-shift on those keys is untouched.
 > **Known issue:** in mode 2 the input line renders but the value is not visible
 > once `ENTER` pushes it onto the stack.
 
+## DB48X
+
+An RPL calculator in the HP 48 tradition ([DB48X](https://github.com/c3d/db48x)).
+Launch it from the third launcher icon; hold `ON` or use `SHIFT`+`ON` to leave.
+
+**Online help** (`SYMB` → `F1`, or the HELP command) is read at runtime from
+`/help/db48x.md` and `/help/db48x.idx` on the calculator's FAT partition. They
+are not part of the firmware image. `Libs/src/build_db48x.sh` writes both to
+`build/db48x-help/`; copy them to `/help/` in mass-storage mode (`./flash.sh
+msc`, then press `Views` on the calculator to leave that mode). Without them help
+shows nothing.
+
 ## USB
 
 The calculator exposes a small control disk (`EOSRECDISK`) used by `edb`, and a
