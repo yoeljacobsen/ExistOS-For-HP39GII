@@ -82,6 +82,14 @@ const dmcp_app_t *g_dmcp_app = NULL;
 // Cached from the active application: read per pixel in the flush loop.
 static bool g_dmcp_ink_set = false;
 
+// Set by LCD_write_line(), cleared by the next flush. DB48X's refresh_dirty()
+// walks the dirty rows and calls LCD_write_line() for each; on a DM42 that
+// sends the row straight to the LCD controller. Here the panel is 256x127 and
+// every row goes through the 400x240 downscale, so pushing one source row at a
+// time is neither cheap nor meaningful. Coalesce instead: note that something
+// changed, and flush once at the next point the application looks for input.
+static bool g_dmcp_lines_dirty = false;
+
 // DB48X's program_main() is an infinite loop: on a DM42 the firmware ends the
 // program from inside sys_sleep(). Reproduce that with a jump back into
 // dmcp_run(), so the platform layer's teardown still runs.
@@ -169,6 +177,10 @@ static char c47_reset_state_file[64] = "/SAVFILES/c47auto.sav";
 //   1 = Zoomed Stack + Softkeys (Status bar + large Y/X stack + softkeys)
 //   2 = 1:1 Pixel-Exact Pan (hold ON + Arrow keys to pan across 400x240)
 static int c47_disp_mode = 0;
+// Rows of the 400x240 image hidden at the top in mode 1, from the application's
+// content_top hook. Zero means the application has no header to drop, in which
+// case mode 1 keeps its C47 meaning (zoomed stack).
+static int c47_hidden_top = 0;
 static int c47_pan_x = 0;
 static int c47_pan_y = 113; // Default to bottom half (stack + softkeys)
 static int c47_help_page = 0; // 0 = off, 1 = page 1, 2 = page 2
@@ -278,6 +290,27 @@ static void c47_update_indicators(void) {
 }
 
 static void c47_flush_screen(void) {
+    g_dmcp_lines_dirty = false;
+
+    c47_hidden_top = 0;
+    if (c47_disp_mode == 1 && g_dmcp_app && g_dmcp_app->content_top) {
+        int top = g_dmcp_app->content_top();
+        if (top < 0) {
+            top = 0;
+        } else if (top > LCD_Y - 64) {
+            top = LCD_Y - 64;       // never hide so much there is nothing left
+        }
+        // Mark the band as chosen even when it is zero: an application with a
+        // content_top must never fall through to the C47 zoom-stack mapping
+        // below, which skips rows 18..83 and would hide its entire stack.
+        c47_hidden_top = top + 1;
+#ifdef DMCP_DEBUG_TRACE
+        {
+            static int last = -1;
+            if (top != last) { last = top; printf("DMCP: content_top=%d\n", top); }
+        }
+#endif
+    }
     if (!c47_raw_lcd_buf || !c47_strip_buf) return;
     c47_init_tables();
     c47_update_indicators();
@@ -317,6 +350,14 @@ static void c47_flush_screen(void) {
                 if (c47_disp_mode == 0) {
                     cy0 = (dy * LCD_Y) / LCD_PIX_H;
                     cy1 = ((dy + 1) * LCD_Y) / LCD_PIX_H;
+                } else if (c47_hidden_top > 0) {
+                    // Header dropped: stretch what is left over the whole panel.
+                    // c47_hidden_top is biased by one so that zero still means
+                    // "this application has no opinion".
+                    int top  = c47_hidden_top - 1;
+                    int span = LCD_Y - top;
+                    cy0 = top + (dy * span) / LCD_PIX_H;
+                    cy1 = top + ((dy + 1) * span) / LCD_PIX_H;
                 } else {
                     // Mode 1:
                     //   dy 0..11   (12 rows) -> cy 0..17    (18 rows: status bar)
@@ -398,7 +439,7 @@ static void c47_show_banner(const char *msg) {
     strncpy(c47_banner_text, msg, sizeof(c47_banner_text) - 1);
     c47_banner_text[sizeof(c47_banner_text) - 1] = '\0';
     c47_banner_until_ms = ll_get_time_ms() + 1200;
-    c47_flush_screen();
+    g_dmcp_lines_dirty = true;
 }
 
 // ============================================================================
@@ -416,8 +457,14 @@ uint8_t *lcd_line_addr(int y) {
 
 void LCD_write_line(uint8_t *buf) {
     if (!buf) return;
-    buf[0] = 0u;
+    buf[0] = 0u;                 // row is no longer dirty in the application's eyes
+    g_dmcp_lines_dirty = true;   // but the panel has not seen it yet
 }
+
+// Flush anything LCD_write_line() reported, at a point where the application is
+// between operations. Without this the screen only updated when some other path
+// happened to call lcd_refresh(), so a result stayed hidden until the next
+// keystroke redrew everything.
 
 void lcd_clear_buf(void) {
     DMCP_TRACE(lcd_clear_buf);
@@ -433,27 +480,29 @@ void lcd_clear_buf(void) {
 
 void lcd_refresh(void) {
     DMCP_TRACE(lcd_refresh);
-    c47_flush_screen();
+    g_dmcp_lines_dirty = true;
 }
 
 void lcd_refresh_dma(void) {
-    c47_flush_screen();
+    
+    g_dmcp_lines_dirty = true;
 }
 
 void lcd_refresh_wait(void) {
-    c47_flush_screen();
+    
+    g_dmcp_lines_dirty = true;
 }
 
 void lcd_forced_refresh(void) {
     DMCP_TRACE(lcd_forced_refresh);
-    c47_flush_screen();
+    g_dmcp_lines_dirty = true;
 }
 
 void lcd_refresh_lines(int ln, int cnt) {
     DMCP_TRACE(lcd_refresh_lines);
     (void)ln;
     (void)cnt;
-    c47_flush_screen();
+    g_dmcp_lines_dirty = true;
 }
 
 void lcd_set_buf_cleared(int val) {
@@ -718,10 +767,10 @@ static void c47_poll_hardware_keys(void) {
         // point of that mode; switch back with VIEWS to give C47 its arrows again.
         if (c47_disp_mode == 2 && c47_help_page == 0) {
             switch (key) {
-                case K39_LEFT:  c47_pan_x -= 36; if (c47_pan_x < 0) c47_pan_x = 0; c47_flush_screen(); return;
-                case K39_RIGHT: c47_pan_x += 36; if (c47_pan_x > LCD_X - LCD_PIX_W) c47_pan_x = LCD_X - LCD_PIX_W; c47_flush_screen(); return;
-                case K39_UP:    c47_pan_y -= 28; if (c47_pan_y < 0) c47_pan_y = 0; c47_flush_screen(); return;
-                case K39_DOWN:  c47_pan_y += 28; if (c47_pan_y > LCD_Y - LCD_PIX_H) c47_pan_y = LCD_Y - LCD_PIX_H; c47_flush_screen(); return;
+                case K39_LEFT:  c47_pan_x -= 36; if (c47_pan_x < 0) c47_pan_x = 0; g_dmcp_lines_dirty = true; return;
+                case K39_RIGHT: c47_pan_x += 36; if (c47_pan_x > LCD_X - LCD_PIX_W) c47_pan_x = LCD_X - LCD_PIX_W; g_dmcp_lines_dirty = true; return;
+                case K39_UP:    c47_pan_y -= 28; if (c47_pan_y < 0) c47_pan_y = 0; g_dmcp_lines_dirty = true; return;
+                case K39_DOWN:  c47_pan_y += 28; if (c47_pan_y > LCD_Y - LCD_PIX_H) c47_pan_y = LCD_Y - LCD_PIX_H; g_dmcp_lines_dirty = true; return;
                 default: break;
             }
         }
@@ -729,13 +778,13 @@ static void c47_poll_hardware_keys(void) {
         // APPS key: toggle 2-page on-screen keymap reference overlay
         if (key == K39_APPS) {
             c47_help_page = (c47_help_page + 1) % 3;
-            c47_flush_screen();
+            g_dmcp_lines_dirty = true;
             return;
         }
         // If help overlay is open, any other key closes it
         if (c47_help_page != 0) {
             c47_help_page = 0;
-            c47_flush_screen();
+            g_dmcp_lines_dirty = true;
             return;
         }
 
@@ -745,7 +794,9 @@ static void c47_poll_hardware_keys(void) {
             if (c47_disp_mode == 0) {
                 c47_show_banner("VIEW: FULL 400x240 GRAYSCALE");
             } else if (c47_disp_mode == 1) {
-                c47_show_banner("VIEW: ZOOM STACK + SOFTKEYS");
+                c47_show_banner((g_dmcp_app && g_dmcp_app->content_top)
+                                ? "VIEW: NO HEADER (more stack)"
+                                : "VIEW: ZOOM STACK + SOFTKEYS");
             } else {
                 c47_show_banner("VIEW: 1:1 PAN (ON+ARROWS)");
             }
@@ -1478,8 +1529,12 @@ void sys_critical_end(void)   { (void)xTaskResumeAll(); }
 // rest to NAND, so an application that takes everything thrashes. DB48X sizes
 // its RPL heap from this. Tune against OSLoader's VMRATE output - if nandrd/s
 // climbs into the hundreds the budget is too large, not too small.
+// 64 KB left DB48X's RPL runtime about 54 KB, below what a DM42 gives it, and
+// entering a second number crashed in blitter::blit with a garbage source
+// pointer -- the shape of a runtime that ran out and carried on. A DM42 has
+// 128 KB of SRAM and hands DB48X most of it, so match that order.
 #ifndef DMCP_APP_HEAP_BUDGET
-#define DMCP_APP_HEAP_BUDGET (64 * 1024)
+#define DMCP_APP_HEAP_BUDGET (96 * 1024)
 #endif
 
 int sys_free_mem(void) {
@@ -1505,6 +1560,9 @@ void *dmcp_rpl_arena(size_t size) {
     arena = malloc(size);
     arena_size = arena ? size : 0;
     printf("DMCP: RPL arena %u bytes = %p\n", (unsigned)size, arena);
+    if (!arena) {
+        printf("DMCP: RPL arena allocation FAILED\n");
+    }
     return arena;
 }
 
@@ -1581,6 +1639,27 @@ static void dmcp_init_sdb(void) {
     msc_end_cb        = c47_noop_cb;
 }
 
+// One writer for the panel. DB48X decides a row is dirty, calls
+// LCD_write_line() and moves on; chasing every refresh entry point to flush
+// synchronously left updates stranded whenever it took a path we had not
+// hooked. This task owns the flush instead, so a draw always reaches the
+// screen within one period no matter how the application got there.
+static TaskHandle_t c47_disp_task = NULL;
+
+// Task entry points in this port must be ARM, not Thumb: the FreeRTOS port's
+// task-start path does not interwork, so a Thumb entry is executed as ARM and
+// faults on its first instruction. Every other task here carries the same
+// attribute; omitting it crashed DB48X the moment the task was scheduled.
+static void __attribute__((target("arm"))) c47_display_task(void *arg) {
+    (void)arg;
+    for (;;) {
+        if (g_dmcp_lines_dirty) {
+            c47_flush_screen();     // clears the flag itself
+        }
+        vTaskDelay(pdMS_TO_TICKS(60));
+    }
+}
+
 bool dmcp_run(const dmcp_app_t *app) {
     bool ok = false;
 
@@ -1624,11 +1703,19 @@ bool dmcp_run(const dmcp_app_t *app) {
         c47_on_held        = false;
         c47_active_c47_key = 0;
         c47_help_page      = 0;
+        // An application that reports a content top has a header the 39gII does
+        // not need: shift, alpha and battery live on the hardware annunciator
+        // row, outside the bitmap. Start with those rows reclaimed; VIEWS still
+        // cycles back to the full image.
+        c47_disp_mode      = app->content_top ? 1 : 0;
         memset(c47_systim_enabled, 0, sizeof(c47_systim_enabled));
 
         c47_banner_until_ms = ll_get_time_ms() + 1800;
         snprintf(c47_banner_text, sizeof(c47_banner_text),
                  "%s: [APPS]=Keys [VIEWS]=Zoom", app->name);
+
+        xTaskCreate(c47_display_task, "dmcpDisp", 512, NULL,
+                    configMAX_PRIORITIES - 4, &c47_disp_task);
 
         printf("%s: entering program_main()\n", app->name);
         if (setjmp(g_dmcp_exit_jmp) == 0) {
@@ -1642,6 +1729,10 @@ bool dmcp_run(const dmcp_app_t *app) {
         printf("%s: out of memory, aborting launch\n", app->name);
     }
 
+    if (c47_disp_task) {
+        vTaskDelete(c47_disp_task);
+        c47_disp_task = NULL;
+    }
     if (c47_strip_buf)   { vPortFree(c47_strip_buf);   c47_strip_buf   = NULL; }
     if (c47_write_buf)   { vPortFree(c47_write_buf);   c47_write_buf   = NULL; }
     if (c47_aux_buf)     { vPortFree(c47_aux_buf);     c47_aux_buf     = NULL; }

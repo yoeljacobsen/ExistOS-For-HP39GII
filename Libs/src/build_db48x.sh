@@ -56,6 +56,24 @@ sed -i 's|\(SETTING_BITS(HeaderFont.*\)settings::LIB17|\1settings::REDUCED|' \
 grep -q "SETTING_BITS(HeaderFont.*settings::REDUCED" "${WORK_DIR}/src/ids.tbl" \
     || { echo "ERROR: header font patch did not apply"; exit 1; }
 
+# Expose the bits the ExistOS port needs from DB48X's UI, with C linkage. The
+# HP 39gII has a hardware annunciator row outside the 256x127 bitmap, so shift
+# and alpha can be shown there for free instead of spending screen rows on
+# DB48X's own header; stack_screen_top() says where that header ends, so the
+# port can drop it and give the space to the stack.
+if ! grep -q "db48x_ui_state" "${WORK_DIR}/src/dmcp/main.cc"; then
+    cat >> "${WORK_DIR}/src/dmcp/main.cc" <<'ACCESSOR'
+
+// ---- ExistOS port accessors (added by Libs/src/build_db48x.sh) -------------
+extern "C" int db48x_ui_state(int *stack_top)
+{
+    if (stack_top)
+        *stack_top = ui.stack_screen_top();
+    return (int) ((ui.shift_plane() & 3) | ((ui.alpha_plane() & 3) << 2));
+}
+ACCESSOR
+fi
+
 CXXFLAGS=(
     -mtune=arm926ej-s
     -mcpu=arm926ej-s
