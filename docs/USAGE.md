@@ -8,70 +8,79 @@
 | :--- | :--- |
 | KhiCAS | Computer algebra (Xcas / Python syntax) |
 | C47 | RPN scientific calculator (WP43 family) |
+| DB48X | RPL calculator in the HP 48 tradition |
 
-`SHIFT`+`ON` turns the calculator off. On battery it powers down properly. With
-USB connected the hardware cannot stay off — the PMU powers it straight back up
-— so it goes into **standby** instead: panel off, clock at minimum, any `ON`
-press wakes it.
+`SHIFT`+`ON` is **off**, which on this calculator means **standby**: panel off,
+clock at minimum, `ON` wakes it where it was. Inside C47 and DB48X it works the
+same way and the application resumes untouched. A real power-down does not stick
+on this board: the power chip turns the calculator straight back on, on battery
+as well as on USB, and unmodified upstream ExistOS behaves the same.
+
+## Keys in C47 and DB48X
+
+Both run on a DM42 keyboard layout; the 39gII's keys are translated so that the
+**legends printed on the case** are what you get, plain and with `SHIFT`. The
+39gII `SHIFT` is held by ExistOS (the annunciator shows it) until the next key.
+`SHIFT` pressed twice, or a `SHIFT`ed key whose legend the application has no
+use for, gives the application's own shift on that key (C47's f, then g; DB48X's
+left, then right shift), so nothing the application offers is out of reach.
+
+`SHIFT`+`APPS` (Info) shows the full table on the calculator itself.
+
+| Key | Plain / `SHIFT` | C47 | DB48X |
+| :--- | :--- | :--- | :--- |
+| `APPS` | quit | OFF → launcher, auto-saves | Off → launcher |
+| `VIEWS` | display mode / Help | – / key overlay | – / Help |
+| `ON`/`C` | EXIT / off | EXIT / standby | EXIT / standby |
+| `x²` | x² / √ | x² / √x | x² / √x |
+| `xʸ` | yˣ / ⁿ√ | yˣ / ˣ√y | yˣ / xroot |
+| `÷` | ÷ / x⁻¹ | ÷ / 1/x | ÷ / 1/x |
+| `LN` `LOG` | ln/eˣ, log/10ˣ | as labelled | ln/eˣ; LOG opens the Powers menu (log10, 10ˣ) |
+| `SIN` `COS` `TAN` | / arc | as labelled | as labelled |
+| `SYMB` | / Setup | EQN / MODE | Symbolic / Setup |
+| `PLOT` | / Setup | PLOT / MODE | Plot / Setup |
+| `NUM` | / Setup | XEQ / MODE | →Num / Setup |
+| `HOME` | / Modes | HOME / MODE | Main menu / Modes |
+| `VARS` | / Chars | RCL / AIM | Variables / Characters |
+| `MATH` | / Cmds | CATALOG | Math menu / Catalog |
+| `a b/c` | / ∠↔ | FRAC toggle / →POL | Fractions / Complex |
+| `X,T,θ,N` | / EEX | STO / EEX | STO / EEX |
+| `←` | / Clear | ← / CLR menu | ← Drop / Clear menu |
+| `(` `)` | / Copy, Paste | R↓, x↔y | algebraic `'()'`, cursor right / Edit menu |
+| `,` | / Mem | R/S / INFO | Swap / Variables |
+| `ALPHA` | | AIM (alpha entry) | Alpha |
+| `7` | / List | 7 / STAT | 7 / List |
+| `8` `9` | / { } | | / List |
+| `4` | / Matrix | 4 / MATX | 4 / Matrix |
+| `5` `6` | / [ ] | | / insert `[]` |
+| `1` | / Prgm | 1 / P/R | 1 / Program |
+| `2` | / i | 2 / j | 2 / Complex |
+| `3` | / π | 3 / π | 3 / Constants |
+| `×` | / ! | × / PROB | × / Probabilities |
+| `−` | / ∠ | − | − / Angles |
+| `+` | / Σ | + / Σ+ | + / Statistics |
+| `0` | / Notes | | 0 / Files |
+| `(-)` | / ABS | CHS / \|x\| | +/− / abs |
+| `ENTER` | / ANS | ENTER / LASTx | ENTER / LastArg |
+| arrows | | ▲▼; ◀ x↔y, ▶ R↓ | ◀▲ cursor left / up, ▶▼ right / down |
+| `F1`–`F6` | | softkeys | softkeys |
+
+The tables live in `System/c47/c47_app.c` and `System/db48x/db48x_app.c`
+(`dmcp_key_t`: 39gII key, plain meaning, `SHIFT` meaning).
 
 ## C47
 
 A port of [C47](https://gitlab.com/rpncalculators/c43), the WP43-family RPN
 scientific calculator. Its 400×240 screen is rendered to the 39gII's 256×127
-panel with anti-aliasing.
-
-### Leaving C47
-
-`SHIFT`+`ON` — C47's own OFF — returns to the launcher and auto-saves to
-`/SAVFILES/C47auto.sav`. A plain `ON`/`C` tap is C47's EXIT.
-
-### Keys
-
-`APPS` shows a two-page keymap overlay on the calculator itself; `VIEWS` cycles
-the display mode. The rest is as printed, with these specifics:
-
-| HP 39gII key | C47 function |
-| :--- | :--- |
-| `F1`–`F6` | softkeys |
-| `SYMB` `PLOT` `NUM` | Σ+, 1/x, √ |
-| `LOG` `LN` | log/10ˣ, ln/eˣ |
-| `HOME` `VARS` `a b/c` | XEQ, STO, RCL |
-| `X,T,θ,n` | R↓ (roll down) |
-| `,` | x↔y |
-| `(` `)` | EEX, R/S |
-| `(-)` | +/− (CHS) |
-| `SHIFT` | f, then g |
-| `ON`/`C` | EXIT |
-| `←` `→` | x↔y, R↓ (the DM42 has no horizontal arrows) |
-
-Four HP keys have no DM42 counterpart and are sent as a shifted pair:
-
-| Key | Sends | Meaning |
-| :--- | :--- | :--- |
-| `x²` | f + √ | x² |
-| `x^y` | f + 1/x | yˣ |
-| `ALPHA` | f + XEQ | alpha entry (AIM) |
-| `MATH` | f + "+" | CATALOG |
-
-Three of the HP's printed shifted legends are redirected to the C47 function
-they name:
-
-| Legend | C47 |
-| :--- | :--- |
-| `SHIFT`+`1` PRGM | P/R — program entry mode |
-| `SHIFT`+`4` MATRIX | MATX menu |
-| `SHIFT`+`7` LIST | STAT menu (C47 has no list type) |
-
-This costs C47's own f+1 (ASSIGN), f+4 (BASE) and f+7 (EQN); all three remain
-reachable through CATALOG on the `MATH` key, whose FCNS and MENUS pages list
-every function and menu. g-shift on those keys is untouched.
+panel with anti-aliasing. `APPS` leaves it (C47's OFF), auto-saving to
+`/SAVFILES/C47auto.sav`.
 
 ### Display modes — `VIEWS`
 
 1. **Full** — the whole 400×240 screen, anti-aliased to 256×127.
 2. **Zoom stack** — status bar, enlarged Y/X registers, softkeys.
 3. **1:1 pixel-exact** — a 256×127 window; the arrow keys pan it. Switch back to
-   another mode to give C47 its arrows again.
+   another mode to give the application its arrows again.
 
 > **Known issue:** in mode 2 the input line renders but the value is not visible
 > once `ENTER` pushes it onto the stack.
@@ -79,9 +88,9 @@ every function and menu. g-shift on those keys is untouched.
 ## DB48X
 
 An RPL calculator in the HP 48 tradition ([DB48X](https://github.com/c3d/db48x)).
-Launch it from the third launcher icon; hold `ON` or use `SHIFT`+`ON` to leave.
+Launch it from the third launcher icon; `APPS` leaves it.
 
-**Online help** (`SYMB` → `F1`, or the HELP command) is read at runtime from
+**Online help** (`SHIFT`+`VIEWS`, or `F1` on the main menu) is read at runtime from
 `/help/db48x.md` and `/help/db48x.idx` on the calculator's FAT partition. They
 are not part of the firmware image. `Libs/src/build_db48x.sh` writes both to
 `build/db48x-help/`; copy them to `/help/` in mass-storage mode (`./flash.sh

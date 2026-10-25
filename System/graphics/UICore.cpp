@@ -425,55 +425,35 @@ void keyMsg(uint32_t key, int state) {
 
         case KEY_ON: {
             if (shift == 1) {
-                // With the 5 V rail up the PMU powers the chip straight back after a
-                // PWD, so a real power-down is not available while USB is connected --
-                // measured, and none of BRWNOUT_PWD, PWDN_BATTBRNOUT, masking the
-                // brownout or DISABLE_PSWITCH changes it. Do the next best thing the
-                // user actually wants from "off": blank the screen, drop the clock and
-                // wait for ON, which is what these calculators do anyway.
-                if (ll_get_vdd5v_present()) {
-                    shift = 0;
-                    ll_disp_set_indicator(0, -1);
-                    ll_disp_sleep(1);      // panel off, not a dark fill: on this STN a
-                                           // black screen drives every pixel
-                    ll_cpu_slowdown_enable(2);
+                // A real power-down does not stick on this board: the PMU powers the
+                // chip straight back up, on battery as well as on USB, and upstream
+                // ExistOS behaves the same (measured with the RTC breadcrumb that
+                // pwrinfo reports). So "off" is standby, as on HP's own firmware:
+                // panel asleep, clock to minimum, wake on ON.
+                shift = 0;
+                ll_disp_set_indicator(0, -1);
+                ll_disp_sleep(1);      // panel off, not a dark fill: on this STN a
+                                       // black screen drives every pixel
+                ll_cpu_slowdown_enable(2);
 
-                    uint32_t last = ll_vm_check_key();
-                    for (;;) {
-                        vTaskDelay(pdMS_TO_TICKS(60));
-                        uint32_t k = ll_vm_check_key();
-                        if (k == last) {
-                            continue;
-                        }
-                        last = k;
-                        if ((k >> 16) && (k & 0xFFFF) == KEY_ON) {
-                            break;
-                        }
+                uint32_t last = ll_vm_check_key();
+                for (;;) {
+                    vTaskDelay(pdMS_TO_TICKS(60));
+                    uint32_t k = ll_vm_check_key();
+                    if (k == last) {
+                        continue;
                     }
-
-                    char ps = config_get_power_save();
-                    ll_cpu_slowdown_enable(ps == 'S' ? 1 : (ps == 'L' ? 2 : 0));
-                    ll_disp_sleep(0);
-                    refreshIndicator();
-                    drawPage(curPage);
-                    break;
+                    last = k;
+                    if ((k >> 16) && (k & 0xFFFF) == KEY_ON) {
+                        break;
+                    }
                 }
 
-                uidisp->draw_box(0, 0, 255, 126, 255, 255);
-                uidisp->draw_bmp((char *)logo, 103, 32, 50, 25);
-                uidisp->draw_printf(128 - 14 * 6 / 2, 74, 12, 0, 255, "Shutting down");
-
-                printf("Trig Power Off\n");
-
-                if (curPage == 2) {
-                    f_closedir(&fileManagerDir);
-                }
-
-                vTaskDelay(pdMS_TO_TICKS(500));
-                ll_power_off();
-                ll_power_off();
-                vTaskDelay(pdMS_TO_TICKS(500));
-                ll_power_off();
+                char ps = config_get_power_save();
+                ll_cpu_slowdown_enable(ps == 'S' ? 1 : (ps == 'L' ? 2 : 0));
+                ll_disp_sleep(0);
+                refreshIndicator();
+                drawPage(curPage);
             }
             break;
         }

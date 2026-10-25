@@ -11,6 +11,7 @@
 #include "sys_llapi.h"
 #include "SystemUI.h"
 #include "keyboard_gii39.h"
+#include "SystemConfig.h"
 #include "filesystem/fatfs/ff.h"
 
 // Capture HP 39gII key enum values before dmcp.h redefines KEY_* macros
@@ -183,7 +184,12 @@ static int c47_disp_mode = 0;
 static int c47_hidden_top = 0;
 static int c47_pan_x = 0;
 static int c47_pan_y = 113; // Default to bottom half (stack + softkeys)
-static int c47_help_page = 0; // 0 = off, 1 = page 1, 2 = page 2
+static int c47_help_page = 0; // 0 = off, else the key overlay page shown
+// The 39gII SHIFT key belongs to the platform layer: 0 = none, 1 = SHIFT,
+// 2 = SHIFT twice. The application's own shift is only ever pressed as part of
+// a key's meaning (dmcp_key_t), so the two cannot drift apart.
+static int dmcp_shift = 0;
+
 static uint32_t c47_banner_until_ms = 0;
 static char c47_banner_text[32] = "";
 
@@ -251,41 +257,36 @@ static void strip_fill_rect(uint8_t *strip, int sy0, int sh, int x0, int y0, int
     }
 }
 
+// The key overlay: the application's keymap_help, C47_HELP_LINES to a page.
+#define C47_HELP_LINES 11
+
 static void c47_render_help_strip(uint8_t *strip, int sy0, int sh) {
     strip_fill_rect(strip, sy0, sh, 0, sy0, LCD_PIX_W, sh, C47_PANEL);
     strip_fill_rect(strip, sy0, sh, 0, 0, LCD_PIX_W, 11, C47_BAR);
 
-    if (c47_help_page == 1) {
-        strip_draw_str5x8(strip, sy0, sh, 4,   2, "C47 KEYMAP (1/2)            [APPS] next", C47_BAR_TXT, C47_BAR);
-        strip_draw_str5x8(strip, sy0, sh, 4,  14, "F1..F6  softkeys      SYMB   Sigma+",     C47_INK, C47_PANEL);
-        strip_draw_str5x8(strip, sy0, sh, 4,  24, "PLOT    1/x           NUM    sqrt",       C47_INK, C47_PANEL);
-        strip_draw_str5x8(strip, sy0, sh, 4,  34, "LOG     log/10^x      LN     ln/e^x",     C47_INK, C47_PANEL);
-        strip_draw_str5x8(strip, sy0, sh, 4,  44, "HOME    XEQ           VARS   STO",        C47_INK, C47_PANEL);
-        strip_draw_str5x8(strip, sy0, sh, 4,  54, "a b/c   RCL           X,T,n  Rv (roll)",  C47_INK, C47_PANEL);
-        strip_draw_str5x8(strip, sy0, sh, 4,  64, "SIN COS TAN  as labelled",                C47_INK, C47_PANEL);
-        strip_draw_str5x8(strip, sy0, sh, 4,  74, ",       x<>y          (-)    +/- (CHS)",  C47_INK, C47_PANEL);
-        strip_draw_str5x8(strip, sy0, sh, 4,  84, "(       EEX           )      R/S",        C47_INK, C47_PANEL);
-        strip_draw_str5x8(strip, sy0, sh, 4,  94, "SHIFT   f, then g     BKSP   backspace",  C47_INK, C47_PANEL);
-        strip_draw_str5x8(strip, sy0, sh, 4, 104, "ON/C    EXIT      SHIFT+ON  quit & save", C47_INK, C47_PANEL);
-        strip_draw_str5x8(strip, sy0, sh, 4, 116, "Digits, . and + - x / are direct.",       C47_INK, C47_PANEL);
-    } else {
-        strip_draw_str5x8(strip, sy0, sh, 4,   2, "C47 KEYMAP (2/2)           [APPS] close", C47_BAR_TXT, C47_BAR);
-        strip_draw_str5x8(strip, sy0, sh, 4,  14, "Keys the HP has and the DM42 does not,",  C47_INK, C47_PANEL);
-        strip_draw_str5x8(strip, sy0, sh, 4,  24, "sent as a shifted pair:",                 C47_INK, C47_PANEL);
-        strip_draw_str5x8(strip, sy0, sh, 4,  34, " x^2    f+sqrt        x^y    f+1/x",      C47_INK, C47_PANEL);
-        strip_draw_str5x8(strip, sy0, sh, 4,  44, " ALPHA  f+XEQ (AIM)   MATH   f+ (CATALOG)",C47_INK, C47_PANEL);
-        strip_draw_str5x8(strip, sy0, sh, 4,  56, "HP shifted legends that C47 keeps",       C47_INK, C47_PANEL);
-        strip_draw_str5x8(strip, sy0, sh, 4,  66, "elsewhere, redirected to match:",         C47_INK, C47_PANEL);
-        strip_draw_str5x8(strip, sy0, sh, 4,  76, " SHIFT+1 PRGM (P/R)   SHIFT+4 MATRIX",    C47_INK, C47_PANEL);
-        strip_draw_str5x8(strip, sy0, sh, 4,  86, " SHIFT+7 LIST (STAT)  others: CATALOG",   C47_INK, C47_PANEL);
-        strip_draw_str5x8(strip, sy0, sh, 4,  98, "UP/DOWN stack & menus  LEFT x<>y",        C47_INK, C47_PANEL);
-        strip_draw_str5x8(strip, sy0, sh, 4, 108, "RIGHT Rv   VIEWS cycles display mode",    C47_INK, C47_PANEL);
-        strip_draw_str5x8(strip, sy0, sh, 4, 118, "In 1:1 mode the arrows pan the view.",    C47_INK, C47_PANEL);
+    int count = g_dmcp_app ? g_dmcp_app->keymap_help_len : 0;
+    int pages = (count + C47_HELP_LINES - 1) / C47_HELP_LINES;
+    char title[48];
+    snprintf(title, sizeof(title), "%s KEYS (%d/%d)  SHIFT+APPS %s",
+             g_dmcp_app ? g_dmcp_app->name : "", c47_help_page, pages,
+             c47_help_page < pages ? "next" : "close");
+    strip_draw_str5x8(strip, sy0, sh, 4, 2, title, C47_BAR_TXT, C47_BAR);
+
+    int first = (c47_help_page - 1) * C47_HELP_LINES;
+    for (int i = 0; i < C47_HELP_LINES && first + i < count; i++) {
+        strip_draw_str5x8(strip, sy0, sh, 4, 14 + i * 10,
+                          g_dmcp_app->keymap_help[first + i], C47_INK, C47_PANEL);
     }
 }
 
 static void c47_update_indicators(void) {
     int ind = (g_dmcp_app && g_dmcp_app->indicators) ? g_dmcp_app->indicators() : 0;
+    // The 39gII SHIFT is held here, not in the application, until the next key.
+    if (dmcp_shift == 1) {
+        ind |= INDICATE_LEFT;
+    } else if (dmcp_shift == 2) {
+        ind |= INDICATE_RIGHT;
+    }
     ll_disp_set_indicator(ind, -1);
 }
 
@@ -659,85 +660,101 @@ static void c47_q_push(int k) {
     }
 }
 
-// Push a synthetic prefix key tap (e.g. f-shift) before the main key
-static void c47_push_shifted_key(int shift_key, int main_key) {
-    c47_q_push(shift_key);
-    c47_q_push(0);
-    c47_q_push(main_key);
-    c47_active_c47_key = main_key;
-}
-
-// f/g shift state. The applications keep their own, so the platform layer
-// tracks what it has sent: 0 = none, 1 = f pending, 2 = g pending.
-static int c47_shift_level = 0;
-
-static int c47_shift_pending(void) {
-    return c47_shift_level;
-}
-
-static int c47_map_39gii_key(uint32_t k39) {
-    switch (k39) {
-        // Row 1: 6 Softmenu Function Keys
-        case K39_F1:             return 38; // KEY_F1
-        case K39_F2:             return 39; // KEY_F2
-        case K39_F3:             return 40; // KEY_F3
-        case K39_F4:             return 41; // KEY_F4
-        case K39_F5:             return 42; // KEY_F5
-        case K39_F6:             return 43; // KEY_F6
-
-        // Row 2 & Navigation Cluster: Top Scientific / Stack Keys
-        case K39_SYMB:           return 1;  // KEY_SIGMA (Sigma+ / catalog)
-        case K39_PLOT:           return 2;  // KEY_INV   (1/x / y^x)
-        case K39_NUM:            return 3;  // KEY_SQRT  (sqrt / x^2)
-        case K39_HOME:           return 6;  // KEY_XEQ   (XEQ / GTO / MATH)
-        case K39_VARS:           return 7;  // KEY_STO   (STO)
-        case K39_ABC:            return 8;  // KEY_RCL   (RCL)
-        case K39_XTPHIN:         return 9;  // KEY_RDN   (R down / pi)
-        case K39_BACKSPACE:      return 17; // KEY_BSP   (Backspace / CLX / DROP)
-
-        // D-pad. The DM42 keyboard has no horizontal arrows, so left/right take the
-        // stack meanings that read naturally in that direction; they duplicate the
-        // "," and X,T,n keys rather than going unused.
-        case K39_UP:             return 18; // KEY_UP    (up / BST)
-        case K39_DOWN:           return 23; // KEY_DOWN  (down / SST)
-        case K39_LEFT:           return 14; // KEY_SWAP  (x<>y)
-        case K39_RIGHT:          return 9;  // KEY_RDN   (roll down)
-
-        // Row 4: Trig & Logs
-        case K39_SIN:            return 10; // KEY_SIN
-        case K39_COS:            return 11; // KEY_COS
-        case K39_TAN:            return 12; // KEY_TAN
-        case K39_LN:             return 5;  // KEY_LN
-        case K39_LOG:            return 4;  // KEY_LOG
-
-        // Row 5 & 6: Brackets, EEX, R/S, Swap
-        case K39_LEFTBRACKET:    return 16; // KEY_E     (EEX)
-        case K39_RIGHTBRACKET:   return 36; // KEY_RUN   (R/S)
-        case K39_COMMA:          return 14; // KEY_SWAP  (x<>y)
-
-        // Shifts & Modifiers
-        case K39_SHIFT:          return 28; // KEY_SHIFT (f / g shift toggle)
-
-        // Numeric & Arithmetic Keypad
-        case K39_DIVISION:       return 22; // KEY_DIV
-        case K39_MULTIPLICATION: return 27; // KEY_MUL
-        case K39_SUBTRACTION:    return 32; // KEY_SUB
-        case K39_PLUS:           return 37; // KEY_ADD
-        case K39_ENTER:          return 13; // KEY_ENTER
-        case K39_NEGATIVE:       return 15; // KEY_CHS   (+/-)
-        case K39_DOT:            return 35; // KEY_DOT   (.)
-        case K39_0:              return 34; // KEY_0
-        case K39_1:              return 29; // KEY_1
-        case K39_2:              return 30; // KEY_2
-        case K39_3:              return 31; // KEY_3
-        case K39_4:              return 24; // KEY_4
-        case K39_5:              return 25; // KEY_5
-        case K39_6:              return 26; // KEY_6
-        case K39_7:              return 19; // KEY_7
-        case K39_8:              return 20; // KEY_8
-        case K39_9:              return 21; // KEY_9
-        default:                 return 0;
+static const dmcp_key_t *dmcp_find_key(uint32_t k39) {
+    if (!g_dmcp_app || !g_dmcp_app->keymap) {
+        return NULL;
     }
+    for (int i = 0; i < g_dmcp_app->keymap_len; i++) {
+        if (g_dmcp_app->keymap[i].k39 == k39) {
+            return &g_dmcp_app->keymap[i];
+        }
+    }
+    return NULL;
+}
+
+// The meaning of a key at a shift level: the table's, or the application's own
+// shift plane on the same DM42 key when the table has nothing for that level.
+static uint16_t dmcp_key_meaning(const dmcp_key_t *e, int level) {
+    if (level == 1 && e->shifted) {
+        return e->shifted;
+    }
+    if (level == 0) {
+        return e->plain;
+    }
+    if (e->plain >= DMCP_ACT_VIEWS) {
+        return 0;
+    }
+    return DMCP_KEY(e->plain & 0xFF, level);
+}
+
+// The application's own shift plane (0 none, 1 f/left, 2 g/right), from its
+// annunciator state. Only trusted when the queue is empty: keys already queued
+// each end on a non-shift key, which consumes any shift before it.
+static int dmcp_app_shift_plane(void) {
+    if (c47_key_q_head != c47_key_q_tail || !g_dmcp_app || !g_dmcp_app->indicators) {
+        return 0;
+    }
+    int ind = g_dmcp_app->indicators();
+    return (ind & INDICATE_RIGHT) ? 2 : (ind & INDICATE_LEFT) ? 1 : 0;
+}
+
+// Bring the application's shift to the plane the meaning asks for, then press
+// the key; its release is sent when the 39gII key comes up. The shift cycles
+// none -> f -> g -> none in both C47 and DB48X. Counting from the application's
+// actual plane matters: DB48X's Off leaves its left shift set (the command
+// never returns to the code that clears it), so after quitting with APPS the
+// next launch started shifted and two taps meant for g landed on "none".
+static void dmcp_send_key(uint16_t meaning) {
+    int k = meaning & 0xFF;
+    int target = (meaning >> 8) & 3;
+    for (int n = (target - dmcp_app_shift_plane() + 3) % 3; n > 0; n--) {
+        c47_q_push(DM_SHIFT);
+        c47_q_push(0);
+    }
+    c47_q_push(k);
+    c47_active_c47_key = k;
+}
+
+static void c47_update_indicators(void);
+
+// "Off". A real power-down does not stick on this board: the PMU powers the chip
+// straight back up, on battery as well as on USB, with upstream ExistOS too.
+// So stand by instead, as HP's own firmware does: panel asleep (not a black
+// fill; on this STN that drives every pixel), slowest clock, wake on ON. The
+// application is simply paused and resumes where it was.
+static volatile bool dmcp_standing_by = false;
+
+static void dmcp_standby(void) {
+    dmcp_standing_by = true;
+    ll_disp_set_indicator(0, -1);
+    ll_disp_sleep(1);
+    ll_cpu_slowdown_enable(2);
+
+    uint32_t last = ll_vm_check_key();
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(60));
+        uint32_t k = ll_vm_check_key();
+        if (k == last) {
+            continue;
+        }
+        last = k;
+        if ((k >> 16) && (k & 0xFFFF) == K39_ON) {
+            break;
+        }
+    }
+    // Swallow the ON release, or it would reach the application as EXIT.
+    while (ll_vm_check_key() >> 16) {
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+    c47_last_raw_keys = ll_vm_check_key();
+    c47_on_held = false;
+
+    char ps = config_get_power_save();
+    ll_cpu_slowdown_enable(ps == 'S' ? 1 : (ps == 'L' ? 2 : 0));
+    ll_disp_sleep(0);
+    dmcp_standing_by = false;
+    c47_update_indicators();
+    g_dmcp_lines_dirty = true;
 }
 
 static void c47_poll_hardware_keys(void) {
@@ -759,13 +776,25 @@ static void c47_poll_hardware_keys(void) {
         // ON+/- globally. ON+F3 there is portBoardPowerOff(). So the port must not
         // claim any ON+key chord; a plain ON tap is still delivered and means EXIT.
         if (key == K39_ON) {
+            if (dmcp_shift) {
+                // SHIFT+ON is OFF on the 39gII's case.
+                dmcp_shift = 0;
+                dmcp_standby();
+                return;
+            }
             c47_on_held = true;
             return;
         }
 
+        if (key == K39_SHIFT) {
+            dmcp_shift = (dmcp_shift + 1) % 3;
+            c47_update_indicators();
+            return;
+        }
+
         // 1:1 pan mode owns the arrows while it is showing, since panning is the whole
-        // point of that mode; switch back with VIEWS to give C47 its arrows again.
-        if (c47_disp_mode == 2 && c47_help_page == 0) {
+        // point of that mode; switch back with VIEWS to give the application its arrows.
+        if (c47_disp_mode == 2 && c47_help_page == 0 && !dmcp_shift) {
             switch (key) {
                 case K39_LEFT:  c47_pan_x -= 36; if (c47_pan_x < 0) c47_pan_x = 0; g_dmcp_lines_dirty = true; return;
                 case K39_RIGHT: c47_pan_x += 36; if (c47_pan_x > LCD_X - LCD_PIX_W) c47_pan_x = LCD_X - LCD_PIX_W; g_dmcp_lines_dirty = true; return;
@@ -775,21 +804,30 @@ static void c47_poll_hardware_keys(void) {
             }
         }
 
-        // APPS key: toggle 2-page on-screen keymap reference overlay
-        if (key == K39_APPS) {
-            c47_help_page = (c47_help_page + 1) % 3;
-            g_dmcp_lines_dirty = true;
-            return;
+        const dmcp_key_t *e = dmcp_find_key(key);
+        int level = dmcp_shift;
+        if (dmcp_shift) {
+            dmcp_shift = 0;
+            c47_update_indicators();
         }
-        // If help overlay is open, any other key closes it
+        uint16_t meaning = e ? dmcp_key_meaning(e, level) : 0;
+
+        // The key overlay pages on SHIFT+APPS and closes on any other key, which
+        // it consumes.
         if (c47_help_page != 0) {
-            c47_help_page = 0;
+            int pages = g_dmcp_app ? (g_dmcp_app->keymap_help_len + C47_HELP_LINES - 1) / C47_HELP_LINES : 0;
+            c47_help_page = (meaning == DMCP_ACT_KEYMAP && c47_help_page < pages) ? c47_help_page + 1 : 0;
             g_dmcp_lines_dirty = true;
             return;
         }
 
-        // VIEWS key: cycle display scaling mode (Full AA -> Zoom Stack -> 1:1 Pan)
-        if (key == K39_VIEWS) {
+        if (meaning == DMCP_ACT_KEYMAP) {
+            c47_help_page = 1;
+            g_dmcp_lines_dirty = true;
+            return;
+        }
+
+        if (meaning == DMCP_ACT_VIEWS) {
             c47_disp_mode = (c47_disp_mode + 1) % 3;
             if (c47_disp_mode == 0) {
                 c47_show_banner("VIEW: FULL 400x240 GRAYSCALE");
@@ -798,84 +836,20 @@ static void c47_poll_hardware_keys(void) {
                                 ? "VIEW: NO HEADER (more stack)"
                                 : "VIEW: ZOOM STACK + SOFTKEYS");
             } else {
-                c47_show_banner("VIEW: 1:1 PAN (ON+ARROWS)");
+                c47_show_banner("VIEW: 1:1 PAN (ARROWS)");
             }
             return;
         }
 
-        // Four HP keys have no DM42 counterpart but name a function C47 reaches via
-        // f-shift, so they are sent as a synthetic f + key pair:
-        //   x^2   -> f + sqrt  (key 3)   x^y   -> f + 1/x  (key 2)
-        //   ALPHA -> f + XEQ   (key 6)   MATH  -> f + "+"  (key 37, CATALOG)
-        // With a shift already pending the user is after that shift's own meaning, so
-        // pass the base key straight through (e.g. g + ALPHA = g + XEQ = GTO).
-        {
-            int base = 0;
-            switch (key) {
-                case K39_X2:    base = 3;  break;  // f + sqrt = x^2
-                case K39_XY:    base = 2;  break;  // f + 1/x  = y^x
-                case K39_ALPHA: base = 6;  break;  // f + XEQ  = AIM (alpha entry)
-                case K39_MATH:  base = 37; break;  // f + "+"  = CATALOG
-                default: break;
-            }
-            if (base) {
-                if (!c47_shift_pending()) {
-                    c47_push_shifted_key(28, base);
-                    c47_shift_level = 0;
-                } else {
-                    c47_active_c47_key = base;
-                    c47_q_push(base);
-                }
-                return;
-            }
-        }
-
-        // The HP 39gII prints shifted legends on its numeric block, and three of them
-        // name functions C47 keeps on other keys. With f pending, redirect those keys
-        // to the DM42 key whose f-shift *is* the labelled function, so the legend on
-        // the case tells the truth:
-        //
-        //   SHIFT+1 "PRGM"   -> f + R/S = P/R, program entry mode
-        //   SHIFT+4 "MATRIX" -> f + 9   = MATX menu
-        //   SHIFT+7 "LIST"   -> f + /   = STAT menu (C47 has no list type; its
-        //                                statistics registers are the nearest thing)
-        //
-        // This costs C47's own f+1 (ASSIGN), f+4 (BASE) and f+7 (EQN); all three stay
-        // reachable through CATALOG (the MATH key), whose MENUS and FCNS pages list
-        // every menu and function. g-shift on these keys is untouched.
-        if (c47_shift_pending() == 1) {
-            int redirect = 0;
-            switch (key) {
-                case K39_1: redirect = 36; break; // R/S -> f = P/R
-                case K39_4: redirect = 21; break; // 9   -> f = MATX
-                case K39_7: redirect = 22; break; // /   -> f = STAT
-                default: break;
-            }
-            if (redirect) {
-                c47_shift_level = 0;
-                c47_active_c47_key = redirect;
-                c47_q_push(redirect);
-                return;
-            }
-        }
-
-        int mapped = c47_map_39gii_key(key);
-        if (mapped > 0) {
-            if (mapped == 28) {                 // SHIFT: none -> f -> g -> none
-                c47_shift_level = (c47_shift_level + 1) % 3;
-            } else {
-                c47_shift_level = 0;            // any other key consumes it
-            }
-            c47_active_c47_key = mapped;
-            c47_q_push(mapped);
+        if (meaning) {
+            dmcp_send_key(meaning);
         }
     } else {
         // Key Release event
         if (key == K39_ON) {
             if (c47_on_held) {
-                // Release of ON/C -> tap C47 KEY_EXIT (33). With f pending this is
-                // C47's OFF, which is how the user quits back to the ExistOS launcher.
-                c47_q_push(33);
+                // Release of ON/C -> tap the application's EXIT.
+                c47_q_push(DM_EXIT);
                 c47_q_push(0);
             }
             c47_on_held = false;
@@ -1572,9 +1546,9 @@ int __sysfn_read_key(int *k1, int *k2) {
     if (k1) *k1 = 0;
     if (k2) *k2 = 0;
     if ((keys >> 16) & 0xFFFFu) {
-        int mapped = c47_map_39gii_key(keys & 0xFFFFu);
-        if (mapped > 0) {
-            if (k1) *k1 = mapped;
+        const dmcp_key_t *e = dmcp_find_key(keys & 0xFFFFu);
+        if (e && e->plain < DMCP_ACT_VIEWS) {
+            if (k1) *k1 = e->plain & 0xFF;
             n = 1;
         }
     }
@@ -1680,7 +1654,9 @@ static void __attribute__((target("arm"))) c47_display_task(void *arg) {
         // last flush, anything that changes without the application telling us.
         // A stale panel is far more confusing to debug than the few percent of
         // CPU this costs.
-        if (g_dmcp_lines_dirty || ++idle >= 8) {
+        // Nothing reaches a sleeping panel; dmcp_standby() marks the screen
+        // dirty when it wakes it.
+        if (!dmcp_standing_by && (g_dmcp_lines_dirty || ++idle >= 8)) {
             idle = 0;
             c47_flush_screen();     // clears the flag itself
         }

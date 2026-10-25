@@ -214,6 +214,41 @@ unbounded `sscanf("%s")` into `char[1024]`. DB48X's C++ mangled names run past
 that and smashed the stack, so signing segfaulted on the larger image. Bounded
 to `%1023s`.
 
+## Keyboard and standby
+
+The platform layer, not the application, owns the 39gII SHIFT key. Each app
+gives `dmcp_app_t.keymap`, one `dmcp_key_t {k39, plain, shifted}` per key, so
+the legends printed on the case are what happens. A meaning is a DM42 key code
+(`DM_*` in `dmcp_app.h`) plus 0, 1 or 2 presses of the app's own shift
+(`DMCP_F` / `DMCP_G`), or an action (`DMCP_ACT_VIEWS` display mode,
+`DMCP_ACT_KEYMAP` the key overlay). An empty shifted meaning, or SHIFT pressed
+twice, falls through to the app's own shift plane on the same DM42 key, so
+nothing the app offers becomes unreachable. `keymap_help` is the text of the
+SHIFT+APPS overlay.
+
+`dmcp_send_key()` does not assume the app's shift is clear: it reads the app's
+current plane from `indicators()` (only once the key queue is empty, so the
+reading is current) and taps `DM_SHIFT` `(target - current + 3) % 3` times.
+This matters because DB48X's Off, which APPS sends to quit, leaves its left
+shift set and never returns, so the next launch started shifted and SHIFT+VIEWS
+ran `+` instead of Help.
+
+SHIFT+ON is standby, in the launcher and inside an app: panel off
+(`ll_disp_sleep`), slow clock, wait for ON, swallow its release, restore the
+power-save setting, redraw. The app is suspended, not stopped, and resumes with
+its state intact. Real power-off is not offered because it reboots (see the
+power notes). ON alone is the DM42 EXIT key.
+
+### Relaunching DB48X: stale stack-linked statics
+
+DB48X links objects that live on its task stack into statics:
+`runtime::GCSafe` (every `gcp<>` registers itself) and `file::current`. The
+layer leaves DB48X by `longjmp`, so the destructors that unlink them never run.
+On relaunch the new task stack sits at the same address and FreeRTOS fills it
+with its register pattern, so the next GC walk followed `0x10101010` and
+panicked (`[MEMORY UNMAP]` in `runtime::move`). `db48x_run()` clears both,
+through their mangled names, before calling `db48x_program_main()`.
+
 ## DB48X build
 
 **`Libs/src/build_db48x.sh` builds the whole DB48X core for ARM926EJ-S.** All 63
@@ -372,14 +407,14 @@ stale). `MATH` brings up the three-plane bar correctly.
 
 ## Next steps
 
-1. **Verify the header-font and exit-flag fixes on device** (built, not yet
-   flashed at the time of writing). Capture with `scrcap` rather than working
-   from a description.
+1. Verify every block's `chksum: xx==xx` line after `./flash.sh sys`. One
+   flash on 2026-10-25 went in with no visible error and the System panicked
+   (`[WR RO]` in `memcpy`) while copying `.data` at boot; flashing the same
+   image again fixed it.
 2. `sys_free_mem()` returns `DMCP_APP_HEAP_BUDGET`, currently 64 KB. It is a
    deliberate budget, not the real free heap: the VM keeps ~40 KB of RAM
    resident and spills the rest to NAND. Tune against `VMRATE` — `nandrd/s` in
    the hundreds means the budget is too large, not too small.
-3. `db48x_indicators()` is a stub returning 0; map DB48X's shift/alpha state.
-4. DB48X reuses C47's launcher icon; it needs its own.
-5. `handle_menu()` and `msg_box()` decline rather than implementing DMCP's
+3. DB48X reuses C47's launcher icon; it needs its own.
+4. `handle_menu()` and `msg_box()` decline rather than implementing DMCP's
    firmware menus. Revisit if DB48X depends on them for anything important.
