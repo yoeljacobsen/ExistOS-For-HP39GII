@@ -56,6 +56,41 @@ sed -i 's|\(SETTING_BITS(HeaderFont.*\)settings::LIB17|\1settings::REDUCED|' \
 grep -q "SETTING_BITS(HeaderFont.*settings::REDUCED" "${WORK_DIR}/src/ids.tbl" \
     || { echo "ERROR: header font patch did not apply"; exit 1; }
 
+# blitter::surface assumes a word-aligned base ("Word-aligned address of
+# surface buffer"), but a grob's bitmap sits right after its LEB128 type, width
+# and height, at any byte offset, and so do font bitmaps. A Cortex-M4 performs
+# unaligned word loads in hardware; the HP 39gII's ARM926 silently returns the
+# word *rotated* instead. That is why rendered stack values -- drawn into a grob
+# in the RPL arena and then blitted -- came out blank, and why the blit sometimes
+# crashed on coordinates computed from rotated garbage. Round the base down to a
+# word and carry the misalignment as a bit offset applied in the two helpers
+# every word/bit lookup goes through. On a little-endian word, byte k holds bits
+# 8k..8k+7, so k bytes off is 8k bits in.
+python3 - "${WORK_DIR}/src/blitter.h" <<'BLITPATCH'
+import sys
+p = sys.argv[1]; s = open(p).read()
+if "existos_origin" not in s:
+    old_ctor = """            : pixels(p),
+              w(w),"""
+    new_ctor = """            : pixels((pixword *) ((uintptr_t) p & ~(uintptr_t) 3)),
+              existos_origin(((uintptr_t) p & 3) * 8),
+              w(w),"""
+    assert old_ctor in s, "ctor"
+    s = s.replace(old_ctor, new_ctor, 1)
+    old_shift = """            return bitoffset % BPW;"""
+    assert s.count(old_shift) == 1, "shift"
+    s = s.replace(old_shift, """            return (bitoffset + existos_origin) % BPW;""")
+    old_addr = """            return pixels + bitoffset / BPW;"""
+    assert s.count(old_addr) == 1, "addr"
+    s = s.replace(old_addr, """            return pixels + (bitoffset + existos_origin) / BPW;""")
+    old_mem = """        pixword *pixels;        // Word-aligned address of surface buffer"""
+    assert old_mem in s, "member"
+    s = s.replace(old_mem, old_mem + """
+        offset   existos_origin; // Bits from pixels to the real start (ExistOS)""")
+    open(p, 'w').write(s)
+BLITPATCH
+grep -q "existos_origin" "${WORK_DIR}/src/blitter.h" || { echo "ERROR: alignment patch did not apply"; exit 1; }
+
 # Expose the bits the ExistOS port needs from DB48X's UI, with C linkage. The
 # HP 39gII has a hardware annunciator row outside the 256x127 bitmap, so shift
 # and alpha can be shown there for free instead of spending screen rows on

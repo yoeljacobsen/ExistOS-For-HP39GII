@@ -293,35 +293,36 @@ second. `dmcp_run()` clears it on entry.
 
 ## DB48X: where the display stands
 
-Driven and captured from the host. Working: launch, header (inverse-video bar
-with date/time and battery), hardware annunciators, the editor/input line, the
-stack separator and level markers, exit, relaunch. The periodic flush means the
-panel is never stale.
+Driven and verified from the host with `key` + `scrcap`. Working: launch,
+inverse-video header, hardware annunciators, editor line, **stack values**
+(`1 ENTER 2 +` -> 3, `4 ENTER 5 x` -> 20, long decimals with digit grouping),
+exit and relaunch.
 
-**Not working: stack values and the softkey menu never render.** The geometry is
-sane and the value exists --
+### The unaligned-surface bug
 
-    DB48X geom: stack 28..240 menu_bottom=0 depth=1
+Stack values never rendered, and the blit occasionally crashed on a wild
+coordinate. Both had one cause. A rendered stack value is drawn into a **grob in
+the RPL arena** and blitted to the screen; the editor draws text directly, which
+is why it worked. `blitter::surface` documents its base as a "word-aligned
+address", but a grob's bitmap sits right after its LEB128 type, width and
+height, at an arbitrary byte offset -- the crash dumps show source bases of
+`0x0202dfdf` and `0x0202e881`. A Cortex-M4 (DM42) does unaligned word loads in
+hardware. **The ARM926 silently returns the word rotated.** Rotated pixel words
+render as nothing; coordinates computed from them occasionally run off the map.
 
--- so after `1 ENTER` the runtime holds one object and the stack region is the
-whole screen below the header, yet a capture of that area contains only the
-vertical separator at source x~28 and a level marker. The editor line renders
-with the same font moments earlier, so it is not fonts, polarity or geometry.
-`menu_screen_bottom() == 0` says the menu has never been laid out either.
+`build_db48x.sh` patches `src/blitter.h`: the surface constructor rounds the
+base down to a word and records the misalignment in `existos_origin` (8 bits per
+byte, since byte k of a little-endian word holds bits 8k..8k+7), and the two
+helpers every word/bit lookup goes through -- `pixel_address()` and
+`pixel_shift()` -- add it. Any other code ported from a Cortex-M target deserves
+the same suspicion: **this CPU does not fault on unaligned access, it gives wrong
+answers.**
 
-Hypotheses not yet tested, in the order worth trying:
+### Still open
 
-1. `Settings` is zero-initialised because its global constructor is not in the
-   linked `.init_array`. That would make foreground and background identical --
-   invisible text -- and a zero menu height, while the header still draws
-   because it uses the explicit Header* colours. `.ctors` holds 61 entries and
-   `System/core/init.c` does run them, so check whether DB48X's
-   `_GLOBAL__sub_I_*` for `settings.cc` is among them. Note the build renames
-   `Settings` to `db48x_Settings` to avoid colliding with C47's.
-2. Rendering a value needs scratch from the RPL arena; if that fails the draw
-   may silently produce nothing. Log `rt.error()` after a render.
-3. `ui.draw_stack()` partially succeeds -- furniture yes, text no -- so
-   instrument it rather than reasoning about it.
+- **No softkey menu.** `menu_screen_bottom()` reports 0: the menu has never been
+  laid out. With the alignment fix in, this is the next thing to look at.
+- The input line sits at the very bottom and can clip in the 240 -> 127 scale.
 
 ## Next steps
 
