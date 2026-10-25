@@ -123,6 +123,8 @@ void portBoardPowerOff()
     while (HW_RTC_STAT.B.NEW_REGS);
     HW_RTC_PERSISTENT3_WR(HW_RTC_SECONDS.U);
     while (HW_RTC_STAT.B.NEW_REGS);
+    HW_RTC_PERSISTENT4_WR(HW_POWER_STS.U);   // power status at the moment of PWD
+    while (HW_RTC_STAT.B.NEW_REGS);
     HW_RTC_PERSISTENT2_WR(PWROFF_MAGIC);
     while (HW_RTC_STAT.B.NEW_REGS);
 
@@ -138,7 +140,7 @@ void portBoardPowerOff()
 // whether one was requested, and how many RTC seconds passed before this boot.
 // On battery there is no USB to log a shutdown, so a reboot-after-shutdown is
 // only diagnosable after the fact.
-uint32_t g_pwrup_sts, g_pwrup_seconds, g_pwrup_off_seconds;
+uint32_t g_pwrup_sts, g_pwrup_seconds, g_pwrup_off_seconds, g_pwrup_off_sts;
 bool g_pwrup_after_poweroff;
 
 void portPowerInit()
@@ -147,6 +149,7 @@ void portPowerInit()
     g_pwrup_seconds = HW_RTC_SECONDS.U;
     g_pwrup_after_poweroff = (HW_RTC_PERSISTENT2.U == PWROFF_MAGIC);
     g_pwrup_off_seconds = HW_RTC_PERSISTENT3.U;
+    g_pwrup_off_sts = HW_RTC_PERSISTENT4.U;
     while (HW_RTC_STAT.B.NEW_REGS);
     HW_RTC_PERSISTENT2_WR(0);
     while (HW_RTC_STAT.B.NEW_REGS);
