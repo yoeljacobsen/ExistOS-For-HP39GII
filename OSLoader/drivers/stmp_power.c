@@ -8,6 +8,8 @@
 #include "hw_irq.h"
 #include "regsrtc.h"
 
+#define PWROFF_MAGIC 0x504F4646u   // "POFF" in HW_RTC_PERSISTENT2
+
 #include "keyboard_up.h"
 #include "../debug.h"
 
@@ -116,6 +118,14 @@ void portBoardPowerOff()
     // Disabling the 5 V detect comparators here does NOT help: it kills USB without
     // powering the chip down, leaving it running with a dead USB stack, which looks
     // like a successful shutdown from the host and like a hang from the keyboard.
+    // Breadcrumb for the next boot, in the battery-backed RTC domain: we meant to
+    // power down, and when. portPowerInit() turns it into "came back N s later".
+    while (HW_RTC_STAT.B.NEW_REGS);
+    HW_RTC_PERSISTENT3_WR(HW_RTC_SECONDS.U);
+    while (HW_RTC_STAT.B.NEW_REGS);
+    HW_RTC_PERSISTENT2_WR(PWROFF_MAGIC);
+    while (HW_RTC_STAT.B.NEW_REGS);
+
     HW_POWER_RESET_WR(BF_POWER_RESET_UNLOCK(BV_POWER_RESET_UNLOCK__KEY) | BM_POWER_RESET_PWD);
 
     for (;;) {
@@ -124,8 +134,22 @@ void portBoardPowerOff()
 }
 
 
+// What the previous power-down looked like from this boot, for "pwrinfo":
+// whether one was requested, and how many RTC seconds passed before this boot.
+// On battery there is no USB to log a shutdown, so a reboot-after-shutdown is
+// only diagnosable after the fact.
+uint32_t g_pwrup_sts, g_pwrup_seconds, g_pwrup_off_seconds;
+bool g_pwrup_after_poweroff;
+
 void portPowerInit()
 {
+    g_pwrup_sts = HW_POWER_STS.U;
+    g_pwrup_seconds = HW_RTC_SECONDS.U;
+    g_pwrup_after_poweroff = (HW_RTC_PERSISTENT2.U == PWROFF_MAGIC);
+    g_pwrup_off_seconds = HW_RTC_PERSISTENT3.U;
+    while (HW_RTC_STAT.B.NEW_REGS);
+    HW_RTC_PERSISTENT2_WR(0);
+    while (HW_RTC_STAT.B.NEW_REGS);
 
     INFO("PWR Init.\n");
 

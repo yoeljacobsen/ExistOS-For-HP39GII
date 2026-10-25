@@ -698,6 +698,18 @@ void tud_cdc_rx_cb(uint8_t itf) {
                        (int)HW_RTC_PERSISTENT0.B.ALARM_WAKE,
                        (int)HW_POWER_STS.B.PSWITCH,
                        (int)HW_POWER_STS.B.VDD5V_GT_VDDIO);
+                extern uint32_t g_pwrup_sts, g_pwrup_seconds, g_pwrup_off_seconds;
+                extern bool g_pwrup_after_poweroff;
+                if (g_pwrup_after_poweroff) {
+                    printf("PWRINFO: this boot followed a power-off %lds earlier\n",
+                           (long)(g_pwrup_seconds - g_pwrup_off_seconds));
+                } else {
+                    printf("PWRINFO: this boot did not follow a power-off\n");
+                }
+                printf("PWRINFO: at boot sts=%08lx pswitch=%d vdd5v=%d\n",
+                       (unsigned long)g_pwrup_sts,
+                       (int)((g_pwrup_sts & BM_POWER_STS_PSWITCH) >> BP_POWER_STS_PSWITCH),
+                       (int)((g_pwrup_sts & BM_POWER_STS_VDD5V_GT_VDDIO) != 0));
                 goto fin;
             }
         }
