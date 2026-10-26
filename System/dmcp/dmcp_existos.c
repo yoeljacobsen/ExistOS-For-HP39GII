@@ -222,6 +222,26 @@ static inline int c47_px_black(const uint8_t *line_ptr, int cx) {
     return g_dmcp_ink_set ? bit : !bit;
 }
 
+// Whether ink is the background around a block of the 400x240 image: more than
+// half of a window a few pixels wider and taller than the block is ink. Decides
+// which way a partly covered destination pixel leans in the downscale.
+static bool c47_ink_background(int cy0, int cy1, int cx0, int cx1) {
+    int y0 = cy0 - 2, y1 = cy1 + 2, x0 = cx0 - 3, x1 = cx1 + 3;
+    if (y0 < 0) y0 = 0;
+    if (y1 > LCD_Y) y1 = LCD_Y;
+    if (x0 < 0) x0 = 0;
+    if (x1 > LCD_X) x1 = LCD_X;
+    int ink = 0, total = 0;
+    for (int y = y0; y < y1; y++) {
+        const uint8_t *line = &c47_raw_lcd_buf[y * 52];
+        for (int x = x0; x < x1; x++) {
+            ink += c47_px_black(line, x);
+            total++;
+        }
+    }
+    return 2 * ink > total;
+}
+
 // Draw a 5x8 ASCII string into the 256-pixel strip buffer (sy0..sy0+sh-1)
 static void strip_draw_str5x8(uint8_t *strip, int sy0, int sh, int x, int y, const char *s, uint8_t fg, uint8_t bg) {
     while (*s) {
@@ -397,23 +417,30 @@ static void c47_flush_screen(void) {
                         }
                     }
 
-                    // Coverage -> shade, biased dark: on this STN panel a stroke thinned
-                    // to one subpixel by the 400->256 downscale still has to read as a
-                    // stroke, so partial coverage lands nearer ink than linear would put it.
+                    // Coverage -> shade, biased towards the stroke: on this STN panel a
+                    // stroke thinned to one subpixel by the 400->256 downscale still has
+                    // to read as a stroke, so partial coverage lands nearer the stroke's
+                    // colour than linear would put it. Strokes are ink on paper, except
+                    // where ink is the background (the active softkey row, a selected
+                    // help link): there the strokes are paper, and the bias flips, or
+                    // white text on black fades to dark gray.
                     uint8_t shade = C47_PAPER;
-                    if (black > 0) {
-                        if (black == total) {
-                            shade = C47_INK;
-                        } else if (total == 4) {
+                    if (black == total) {
+                        shade = C47_INK;
+                    } else if (black > 0) {
+                        bool inverse = c47_ink_background(cy0, cy1, cx0, cx1);
+                        int stroke = inverse ? total - black : black;
+                        int v;
+                        if (total == 4) {
                             static const uint8_t lut4[5] = {0xFF, 0x8F, 0x47, 0x17, 0x00};
-                            shade = lut4[black];
+                            v = lut4[stroke];
                         } else if (total == 2) {
-                            shade = (black == 1) ? 0x67 : C47_INK;
+                            v = (stroke == 1) ? 0x67 : C47_INK;
                         } else {
-                            int v = 255 - (black * 300) / total;
+                            v = 255 - (stroke * 300) / total;
                             if (v < 0) v = 0;
-                            shade = (uint8_t)v;
                         }
+                        shade = (uint8_t)(inverse ? 255 - v : v);
                     }
                     dst[dx] = shade;
                 }

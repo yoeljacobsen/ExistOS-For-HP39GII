@@ -413,11 +413,17 @@ inside the sector the file object already holds (FatFs's own invariant: while
 otherwise. `build_db48x.sh` redirects DB48X's `f_read` to it with
 `objcopy --redefine-sym`. Lookups are now immediate.
 
-### Help text font
+### Help and menu fonts
 
-The help page draws its text in PixelOperator 16 px (`HelpTextFont`, Bold for
-white-on-black styles) instead of FogSans 18 px, which blurred in the
-400x240 -> 256x127 shrink. Menus, stack labels and errors keep the stock font.
+The help page draws its text in PixelOperator 16 px (`HelpTextFont`), and the
+softkey labels and white-on-black help styles use its Bold cut
+(`HelpTextBoldFont`), instead of FogSans 18 px, which blurred in the
+400x240 -> 256x127 shrink. Stack labels and errors keep the stock font.
+
+The downscale used to lean every partly covered pixel towards ink, which kept
+thin black strokes but turned white strokes on black (the active softkey row,
+a selected link) dark gray. `c47_ink_background()` now checks whether ink is
+the background around the block and flips the bias there.
 The generated fonts, their generator and the regeneration steps are in
 `tools/db48x-fonts/`; `build_db48x.sh` installs and wires them in.
 

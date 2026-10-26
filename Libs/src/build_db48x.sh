@@ -34,12 +34,12 @@ mkdir -p "${GEN_DIR}" "${OBJ_DIR}"
 cp "${ROOT_DIR}/System/dmcp/dmcp.h"   "${GEN_DIR}/dmcp.h"
 cp "${ROOT_DIR}/System/dmcp/ff_ifc.h" "${GEN_DIR}/ff_ifc.h"
 
-# Help text in a pixel font that stays crisp through the 400x240 -> 256x127
-# shrink, where the stock HelpFont blurs (tools/db48x-fonts/README.md). Only the
-# help page changes: menus, stack labels and errors keep HelpFont, whose labels
-# read better on the inverted softkey row. Normal text takes the regular cut;
-# white-on-black styles (the selected link) take the bold one, because thin
-# white strokes on black fade to gray in the shrink.
+# Help text and softkey labels in a pixel font that stays crisp through the
+# 400x240 -> 256x127 shrink, where the stock HelpFont blurs
+# (tools/db48x-fonts/README.md). Help text takes the regular cut; white-on-black
+# help styles (the selected link) and the menu take the bold one, because thin
+# white strokes on black, as on the active softkey row, fade to gray in the
+# shrink. Stack labels and errors keep HelpFont.
 cp "${ROOT_DIR}/tools/db48x-fonts/HelpTextFont.cc"     "${WORK_DIR}/fonts/"
 cp "${ROOT_DIR}/tools/db48x-fonts/HelpTextBoldFont.cc" "${WORK_DIR}/fonts/"
 python3 - "${WORK_DIR}/src" <<'HELPFONTPATCH'
@@ -67,6 +67,9 @@ patch("font.cc", [
     ("    HelpBoldFont     = HelpFont;\n    HelpItalicFont   = HelpFont;\n",
      "    HelpBoldFont     = HelpTextFont;\n    HelpItalicFont   = HelpTextFont;\n", 1),
 ], "HelpTextFont")
+patch("font.cc", [("    MenuFont         = HelpFont;\n",
+                   "    MenuFont         = HelpTextBoldFont;\n", 1)],
+      "MenuFont         = HelpTextBoldFont")
 patch("user_interface.cc", [
     # The help style table
     ("        { HelpFont,         p::black,  p::white,",

@@ -1,4 +1,4 @@
-# DB48X help-text fonts for the HP 39gII
+# DB48X help and menu fonts for the HP 39gII
 
 DB48X draws a 400x240 screen; ExistOS shrinks it to the 39gII's 256x127 by
 averaging 2x2 (or 2x1) blocks. DB48X's `HelpFont` (FogSans, 18 px, an outline
@@ -10,21 +10,29 @@ The help page now uses its own fonts:
 - `HelpTextFont.cc`: **PixelOperator at 16 px**, a pixel font whose outlines
   sit on the pixel grid, so strokes shrink to clean lines. Lines are 18 px, and
   about 55 characters fit on a line (FogSans: about 45).
-- `HelpTextBoldFont.cc`: PixelOperator Bold, for the white-on-black styles (the
-  selected link), where thin white strokes on black fade to gray.
+- `HelpTextBoldFont.cc`: PixelOperator Bold, for the softkey menu labels and the
+  white-on-black help styles (the selected link). Labels are short, so its one
+  weakness at this size (m closing up towards n in running text) matters less,
+  and its 2-pixel strokes hold up white on black. Menu rows are 18 px instead of
+  20, so three rows give the stack 6 px back.
 
 Glyphs PixelOperator lacks (arrows, Greek, math, super/subscripts: 728 of
 them) come from FogSans, scaled to the same 9 px cap height, so coverage is the
 same as DB48X's own font.
 
-Menus, stack level numbers and error messages keep the stock `HelpFont`: on the
-inverted softkey row, PixelOperator's thin white strokes washed out. The Bold
-cut was also tried for the whole help body; at this size its m closes up into
-an n.
+Stack level numbers and error messages keep the stock `HelpFont`. The Bold cut
+was also tried for the whole help body; in running text its m closes up into an
+n, so the body uses the regular cut.
+
+White on black also needed a scaler change: the downscale leans partly covered
+pixels towards ink, so thin black strokes survive, which turned white strokes
+on black into dark gray. It now leans towards whichever colour is not the
+background around the pixel (`c47_ink_background()` in
+`System/dmcp/dmcp_existos.c`).
 
 `Libs/src/build_db48x.sh` copies both `.cc` files into the DB48X tree and
-patches `font.h`, `font.cc` and the help style table in `user_interface.cc` to
-use them. A normal build needs nothing else.
+patches `font.h`, `font.cc` (including `MenuFont`) and the help style table in
+`user_interface.cc` to use them. A normal build needs nothing else.
 
 ## Regenerating
 
