@@ -413,6 +413,17 @@ inside the sector the file object already holds (FatFs's own invariant: while
 otherwise. `build_db48x.sh` redirects DB48X's `f_read` to it with
 `objcopy --redefine-sym`. Lookups are now immediate.
 
+### Help text font
+
+The help page draws its text in PixelOperator 16 px (`HelpTextFont`, Bold for
+white-on-black styles) instead of FogSans 18 px, which blurred in the
+400x240 -> 256x127 shrink. Menus, stack labels and errors keep the stock font.
+The generated fonts, their generator and the regeneration steps are in
+`tools/db48x-fonts/`; `build_db48x.sh` installs and wires them in.
+
+Note for anyone running DB48X's `ttf2font`: `-S` is the line height in
+percent, not a threshold. DB48X's own `-S 80` gave 12 px lines on a 15 px font.
+
 ### Still open
 
 - The input line sits at the very bottom and can clip in the 240 -> 127 scale.

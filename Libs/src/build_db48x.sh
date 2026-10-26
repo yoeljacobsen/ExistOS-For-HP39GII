@@ -34,6 +34,57 @@ mkdir -p "${GEN_DIR}" "${OBJ_DIR}"
 cp "${ROOT_DIR}/System/dmcp/dmcp.h"   "${GEN_DIR}/dmcp.h"
 cp "${ROOT_DIR}/System/dmcp/ff_ifc.h" "${GEN_DIR}/ff_ifc.h"
 
+# Help text in a pixel font that stays crisp through the 400x240 -> 256x127
+# shrink, where the stock HelpFont blurs (tools/db48x-fonts/README.md). Only the
+# help page changes: menus, stack labels and errors keep HelpFont, whose labels
+# read better on the inverted softkey row. Normal text takes the regular cut;
+# white-on-black styles (the selected link) take the bold one, because thin
+# white strokes on black fade to gray in the shrink.
+cp "${ROOT_DIR}/tools/db48x-fonts/HelpTextFont.cc"     "${WORK_DIR}/fonts/"
+cp "${ROOT_DIR}/tools/db48x-fonts/HelpTextBoldFont.cc" "${WORK_DIR}/fonts/"
+python3 - "${WORK_DIR}/src" <<'HELPFONTPATCH'
+import sys
+d = sys.argv[1]
+
+def patch(name, pairs, marker):
+    p = f"{d}/{name}"; s = open(p).read()
+    if marker in s:
+        return
+    for old, new, count in pairs:
+        assert s.count(old) == count, f"{name}: expected {count} of {old!r}"
+        s = s.replace(old, new)
+    open(p, "w").write(s)
+
+patch("font.h", [("extern font_p HelpFont;\n",
+                  "extern font_p HelpFont;\nextern font_p HelpTextFont;\n"
+                  "extern font_p HelpTextBoldFont;\n", 1)], "HelpTextFont")
+patch("font.cc", [
+    ("font_p HelpFont;\n",
+     "font_p HelpFont;\nfont_p HelpTextFont;\nfont_p HelpTextBoldFont;\n", 1),
+    ("    GENERATED_FONT(HelpFont);\n",
+     "    GENERATED_FONT(HelpFont);\n    GENERATED_FONT(HelpTextFont);\n"
+     "    GENERATED_FONT(HelpTextBoldFont);\n", 1),
+    ("    HelpBoldFont     = HelpFont;\n    HelpItalicFont   = HelpFont;\n",
+     "    HelpBoldFont     = HelpTextFont;\n    HelpItalicFont   = HelpTextFont;\n", 1),
+], "HelpTextFont")
+patch("user_interface.cc", [
+    # The help style table
+    ("        { HelpFont,         p::black,  p::white,",
+     "        { HelpTextFont,     p::black,  p::white,", 1),
+    ("        { HelpFont,         p::white,  p::black,",
+     "        { HelpTextBoldFont, p::white,  p::black,", 1),
+    ("        { HelpFont,         p::black,  p::gray50,",
+     "        { HelpTextFont,     p::black,  p::gray50,", 1),
+    ("        { HelpFont,         p::white,  p::gray10,",
+     "        { HelpTextBoldFont, p::white,  p::gray10,", 1),
+    # The "Keys:" line and subtitle command lists, and the scroll step
+    ("font_p af = HelpFont;", "font_p af = HelpTextFont;", 1),
+    ("font_p  af    = HelpFont;", "font_p  af    = HelpTextFont;", 1),
+    ("    size height = HelpFont->height();\n",
+     "    size height = HelpTextFont->height();\n", 1),
+], "HelpTextFont")
+HELPFONTPATCH
+
 VERSION="$(git -C "${WORK_DIR}" describe --tags --always 2>/dev/null || echo existos)"
 
 # program_init() allocates the RPL runtime arena with malloc() and never frees
@@ -222,6 +273,8 @@ SOURCES=(
     fonts/HelpFont.cc
     fonts/ReducedFont.cc
     fonts/StackFont.cc
+    fonts/HelpTextFont.cc
+    fonts/HelpTextBoldFont.cc
 )
 while IFS= read -r f; do SOURCES+=("src/$(basename "$f")"); done < <(ls "${WORK_DIR}"/src/*.cc | grep -v "/tests\.cc$")
 
