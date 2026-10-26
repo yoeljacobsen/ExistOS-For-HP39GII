@@ -573,12 +573,14 @@ extern bool transScr;
 // have to be paced apart or the System's 20 ms poll never sees the press.
 #define KEYINJ_QUEUE 16
 static volatile uint8_t  keyinj_buf[KEYINJ_QUEUE];
+static volatile uint16_t keyinj_hold_ms[KEYINJ_QUEUE];
 static volatile uint32_t keyinj_head = 0, keyinj_tail = 0;
 
-static void keyinj_push(uint8_t code) {
+static void keyinj_push(uint8_t code, uint16_t hold_ms) {
     uint32_t next = (keyinj_tail + 1) % KEYINJ_QUEUE;
     if (next != keyinj_head) {
         keyinj_buf[keyinj_tail] = code;
+        keyinj_hold_ms[keyinj_tail] = hold_ms;
         keyinj_tail = next;
     }
 }
@@ -588,10 +590,11 @@ void __attribute__((target("arm"))) vKeyInjectTask(void *_) {
     for (;;) {
         if (keyinj_head != keyinj_tail) {
             uint8_t code = keyinj_buf[keyinj_head];
+            uint16_t hold = keyinj_hold_ms[keyinj_head];
             keyinj_head = (keyinj_head + 1) % KEYINJ_QUEUE;
 
             g_latest_key_status = (1u << 16) | code;
-            vTaskDelay(pdMS_TO_TICKS(120));
+            vTaskDelay(pdMS_TO_TICKS(hold));
             g_latest_key_status = (0u << 16) | code;
             vTaskDelay(pdMS_TO_TICKS(180));
         } else {
@@ -664,8 +667,19 @@ void tud_cdc_rx_cb(uint8_t itf) {
                     if (*p < '0' || *p > '9') break;
                     int v = 0;
                     while (*p >= '0' && *p <= '9') v = v * 10 + (*p++ - '0');
-                    if (v >= 0 && v < 256) keyinj_push((uint8_t)v);
+                    if (v >= 0 && v < 256) keyinj_push((uint8_t)v, 120);
                 }
+                goto fin;
+            }
+
+            // "hold 9 1500" holds one key down for that many ms (long presses).
+            if (strncmp(cdc_path_loader_buffer, "hold ", 5) == 0) {
+                const char *p = cdc_path_loader_buffer + 5;
+                int v = 0, ms = 0;
+                while (*p >= '0' && *p <= '9') v = v * 10 + (*p++ - '0');
+                while (*p == ' ') p++;
+                while (*p >= '0' && *p <= '9') ms = ms * 10 + (*p++ - '0');
+                if (v < 256 && ms > 0 && ms <= 60000) keyinj_push((uint8_t)v, (uint16_t)ms);
                 goto fin;
             }
 

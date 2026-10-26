@@ -251,6 +251,12 @@ arm-none-eabi-ar rcs "${OUT_LIB}" "${OBJ_DIR}"/*.o
 # calls it by the new name.
 arm-none-eabi-objcopy --redefine-sym program_main=db48x_program_main "${OUT_LIB}"
 
+# DB48X reads its help files one f_read per character, and every f_read takes
+# and releases the volume lock, which costs several seconds per help topic
+# lookup (and a long press on a key is one). f_read_cached (System/filesystem/
+# fatfs/ff.c) serves reads inside the already-cached sector without the lock.
+arm-none-eabi-objcopy --redefine-sym f_read=f_read_cached "${OUT_LIB}"
+
 # DB48X and C47 are linked into one binary and both define a few globals under
 # the same name -- they were each written to be the only program on a DM42.
 # Rename DB48X's. --redefine-sym rewrites references inside the archive too, so

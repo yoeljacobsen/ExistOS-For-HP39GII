@@ -157,6 +157,9 @@ static const char *const db48x_keymap_help[] = {
     "2 Cplx 3 Const 0 Files ENTER LastArg",
     "Arrows: left=up, right=down (cursor)",
     "ON    EXIT          SHIFT+ON standby",
+    "F1-F6 menu: bottom row; SHIFT+F middle",
+    "      row; SHIFT twice+F top row.",
+    "      Hold an F key: help on its command",
 };
 
 static const dmcp_app_t db48x_app = {

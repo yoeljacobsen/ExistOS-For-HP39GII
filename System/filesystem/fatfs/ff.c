@@ -4000,6 +4000,41 @@ FRESULT f_read (
 
 
 
+/*-----------------------------------------------------------------------*/
+/* Read File without the volume lock while inside the cached sector      */
+/*-----------------------------------------------------------------------*/
+/* For callers reading a byte at a time (DB48X scans its help files with
+   one f_read per character). While the file pointer is inside a sector,
+   fp->buf holds that sector, as f_read itself relies on, so the bytes can
+   be copied without taking the volume lock. Only for a file object that
+   no other task uses. Anything else goes through f_read. */
+
+FRESULT f_read_cached (
+	FIL* fp,
+	void* buff,
+	UINT btr,
+	UINT* br
+)
+{
+#if !FF_FS_TINY
+	FATFS *fs = fp->obj.fs;
+	UINT ofs;
+
+	if (fs && fs->fs_type && fp->obj.id == fs->id && fp->err == FR_OK && (fp->flag & FA_READ)) {
+		ofs = (UINT)(fp->fptr % SS(fs));
+		if (ofs != 0 && btr <= SS(fs) - ofs && btr <= fp->obj.objsize - fp->fptr) {
+			memcpy(buff, fp->buf + ofs, btr);
+			fp->fptr += btr;
+			*br = btr;
+			return FR_OK;
+		}
+	}
+#endif
+	return f_read(fp, buff, btr, br);
+}
+
+
+
 
 #if !FF_FS_READONLY
 /*-----------------------------------------------------------------------*/

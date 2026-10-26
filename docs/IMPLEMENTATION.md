@@ -74,6 +74,8 @@ see `System/core/keyboard_gii39.h`). A dedicated OSLoader task paces press and
 release 120 ms apart, because the System polls keys every 20 ms and anything
 faster is missed. The physical scan only writes `g_latest_key_status` when a key
 actually changes, so an injected value survives until the next real press.
+`hold <code> <ms>` holds one key down that long, for long presses (DB48X shows
+help for a softkey's command after 500 ms).
 
 Useful codes: `RIGHT` 12, `LEFT` 20, `UP` 4, `DOWN` 28, `ENTER` 76, `ON` 80,
 `VIEWS` 18, `APPS` 25, `0`–`1` 72–73, `2`–`3` 66–67, `+` 68.
@@ -394,6 +396,22 @@ priority that prints the app task's saved context every second:
 sits in `vTaskDelay`. Any task entry point must be `target("arm")`: this
 FreeRTOS port starts every task in ARM state, and a Thumb entry dies with
 `[UND]` and registers still holding the 0x01010101 fill pattern.
+
+### Help lookups and long presses: one f_read per byte
+
+DB48X reads its help files through `file::getchar()`, one `f_read` per byte.
+Each `f_read` takes and releases the FatFs volume lock (`ff_req_grant`, a
+FreeRTOS semaphore whose critical sections are SVCs into the OSLoader), so a
+topic lookup, which scans the 131 KB `db48x.idx`, took 10-20 s. A long press
+on a softkey is such a lookup, made while the key is still down, so it looked
+like a hang. The PC sampler showed the time in `xQueueSemaphoreTake` /
+`xQueueGenericSend`, not in DB48X.
+
+`f_read_cached()` (in `ff.c`) copies straight from `fp->buf` when the read lies
+inside the sector the file object already holds (FatFs's own invariant: while
+`fptr` is mid-sector, `fp->sect`/`fp->buf` are that sector), and calls `f_read`
+otherwise. `build_db48x.sh` redirects DB48X's `f_read` to it with
+`objcopy --redefine-sym`. Lookups are now immediate.
 
 ### Still open
 

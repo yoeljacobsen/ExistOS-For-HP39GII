@@ -63,7 +63,7 @@ left, then right shift), so nothing the application offers is out of reach.
 | `(-)` | / ABS | CHS / \|x\| | +/− / abs |
 | `ENTER` | / ANS | ENTER / LASTx | ENTER / LastArg |
 | arrows | | ▲▼; ◀ x↔y, ▶ R↓ | ◀▲ cursor left / up, ▶▼ right / down |
-| `F1`–`F6` | | softkeys | softkeys |
+| `F1`–`F6` | | softkeys | softkeys: `SHIFT`+F picks the middle menu row, `SHIFT` twice + F the top row; hold an F key for help on its command |
 
 The tables live in `System/c47/c47_app.c` and `System/db48x/db48x_app.c`
 (`dmcp_key_t`: 39gII key, plain meaning, `SHIFT` meaning).
