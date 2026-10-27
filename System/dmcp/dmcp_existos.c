@@ -699,9 +699,37 @@ static const dmcp_key_t *dmcp_find_key(uint32_t k39) {
     return NULL;
 }
 
+// Whether the application is taking letters (C47 AIM/EIM, DB48X alpha), from its
+// annunciator state.
+static bool dmcp_app_alpha(void) {
+    if (!g_dmcp_app || !g_dmcp_app->indicators) {
+        return false;
+    }
+    return (g_dmcp_app->indicators() & (INDICATE_A__Z | INDICATE_a__z)) != 0;
+}
+
 // The meaning of a key at a shift level: the table's, or the application's own
 // shift plane on the same DM42 key when the table has nothing for that level.
+//
+// In alpha mode a key with a letter on its case sends the DM42 key that carries
+// that letter in the application, and SHIFT applies the application's own shift
+// planes to it (C47: lowercase, then digits/Greek; DB48X: digits and symbols).
+// An alpha meaning that already includes shifts is that one character, and its
+// key keeps its usual meaning when shifted. Keys with no letter keep their DM42
+// key on every plane, so ENTER, the arrows and SHIFT+ENTER (DB48X: lowercase)
+// still do what the application does with them in alpha mode.
 static uint16_t dmcp_key_meaning(const dmcp_key_t *e, int level) {
+    if (dmcp_app_alpha()) {
+        if (e->alpha > 0xFF) {
+            if (level == 0) {
+                return e->alpha;
+            }
+        } else if (e->alpha) {
+            return DMCP_KEY(e->alpha, level);
+        } else if (e->plain <= 0xFF) {
+            return DMCP_KEY(e->plain, level);
+        }
+    }
     if (level == 1 && e->shifted) {
         return e->shifted;
     }
@@ -715,10 +743,10 @@ static uint16_t dmcp_key_meaning(const dmcp_key_t *e, int level) {
 }
 
 // The application's own shift plane (0 none, 1 f/left, 2 g/right), from its
-// annunciator state. Only trusted when the queue is empty: keys already queued
-// each end on a non-shift key, which consumes any shift before it.
+// annunciator state. Keys are only translated once the application has taken
+// everything queued before them (dmcp_translate_keys), so this is current.
 static int dmcp_app_shift_plane(void) {
-    if (c47_key_q_head != c47_key_q_tail || !g_dmcp_app || !g_dmcp_app->indicators) {
+    if (!g_dmcp_app || !g_dmcp_app->indicators) {
         return 0;
     }
     int ind = g_dmcp_app->indicators();
@@ -784,13 +812,39 @@ static void dmcp_standby(void) {
     g_dmcp_lines_dirty = true;
 }
 
+// Physical key events wait here until the application has taken every DM42 key
+// queued before them. What a key means depends on the application's state (its
+// shift plane, alpha mode), and that state only reflects a key once the
+// application has processed it: ALPHA then VARS typed quickly must see alpha on.
+#define DMCP_RAW_QUEUE_SIZE 16
+static uint32_t dmcp_raw_q[DMCP_RAW_QUEUE_SIZE];
+static int dmcp_raw_q_head = 0;
+static int dmcp_raw_q_tail = 0;
+
+static void dmcp_translate_key(uint32_t keys);
+
+static void dmcp_translate_keys(void) {
+    while (dmcp_raw_q_head != dmcp_raw_q_tail && c47_key_q_head == c47_key_q_tail) {
+        uint32_t keys = dmcp_raw_q[dmcp_raw_q_head];
+        dmcp_raw_q_head = (dmcp_raw_q_head + 1) & (DMCP_RAW_QUEUE_SIZE - 1);
+        dmcp_translate_key(keys);
+    }
+}
+
 static void c47_poll_hardware_keys(void) {
     uint32_t keys = ll_vm_check_key();
-    if (keys == c47_last_raw_keys) {
-        return;
+    if (keys != c47_last_raw_keys) {
+        c47_last_raw_keys = keys;
+        int next = (dmcp_raw_q_tail + 1) & (DMCP_RAW_QUEUE_SIZE - 1);
+        if (next != dmcp_raw_q_head) {
+            dmcp_raw_q[dmcp_raw_q_tail] = keys;
+            dmcp_raw_q_tail = next;
+        }
     }
-    c47_last_raw_keys = keys;
+    dmcp_translate_keys();
+}
 
+static void dmcp_translate_key(uint32_t keys) {
     uint32_t key = keys & 0xFFFFu;
     uint32_t kpress = (keys >> 16) & 0xFFFFu;
 
@@ -1730,6 +1784,7 @@ bool dmcp_run(const dmcp_app_t *app) {
         dmcp_init_sdb();
 
         key_pop_all();
+        dmcp_raw_q_head    = dmcp_raw_q_tail = 0;
         c47_last_raw_keys  = ll_vm_check_key();
         c47_on_held        = false;
         c47_active_c47_key = 0;

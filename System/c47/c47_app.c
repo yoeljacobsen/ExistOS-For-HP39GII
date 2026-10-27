@@ -46,7 +46,7 @@ static int c47_indicators(void) {
     int ind = 0;
     if (shiftF) ind |= INDICATE_LEFT;
     if (shiftG) ind |= INDICATE_RIGHT;
-    if (calcMode == 3 /* CM_AIM */ || calcMode == 11 /* CM_EIM */) {
+    if (calcMode == 1 /* CM_AIM */ || calcMode == 13 /* CM_EIM */) {
         ind |= (alphaCase == 0) ? INDICATE_A__Z : INDICATE_a__z;
     }
     if (programRunStop == 1 /* PGM_RUNNING */) {
@@ -86,7 +86,9 @@ static void c47_run(void) {
 }
 
 // The HP 39gII legends (plain / SHIFT), mapped onto C47's DM42 layout, where
-// f and g are C47's two shifts. Keys whose 39gII legend C47 has no use for
+// f and g are C47's two shifts.
+// Columns: 39gII key, plain, SHIFT, alpha mode. [X] in a comment is the letter
+// the key types in alpha mode. Keys whose 39gII legend C47 has no use for
 // fall through to f (and SHIFT twice to g) on the same DM42 key.
 static const dmcp_key_t c47_keymap[] = {
     { KEY_F1, DM_F1, 0 }, { KEY_F2, DM_F2, 0 }, { KEY_F3, DM_F3, 0 },
@@ -106,45 +108,45 @@ static const dmcp_key_t c47_keymap[] = {
     { KEY_APPS,  DMCP_F(DM_EXIT), DMCP_ACT_KEYMAP },  // OFF = quit to launcher / Info
     { KEY_VIEWS, DMCP_ACT_VIEWS, DMCP_ACT_KEYMAP },   // display mode / Help
 
-    { KEY_VARS,      DM_RCL,          DMCP_F(DM_XEQ) },  // RCL       / Chars: AIM
-    { KEY_MATH,      DMCP_F(DM_ADD),  DMCP_F(DM_ADD) },  // CATALOG   / Cmds: CATALOG
-    { KEY_ABC,       DMCP_G(DM_SIGMA), DMCP_G(DM_TAN) }, // a b/c FRC / ->POL
-    { KEY_XTPHIN,    DM_STO,          DM_E },            // STO       / EEX
-    { KEY_BACKSPACE, DM_BSP,          DMCP_G(DM_BSP) },  // <-        / Clear: CLR menu
+    { KEY_VARS,           DM_RCL,           DMCP_F(DM_XEQ),  DM_SIGMA },        // [A] RCL       / Chars: AIM
+    { KEY_MATH,           DMCP_F(DM_ADD),   DMCP_F(DM_ADD),  DM_INV },          // [B] CATALOG   / Cmds: CATALOG
+    { KEY_ABC,            DMCP_G(DM_SIGMA), DMCP_G(DM_TAN),  DM_SQRT },         // [C] a b/c FRC / ->POL
+    { KEY_XTPHIN,         DM_STO,           DM_E,            DM_LOG },          // [D] STO       / EEX
+    { KEY_BACKSPACE,      DM_BSP,           DMCP_G(DM_BSP),  0 },               // <-        / Clear: CLR menu
 
-    { KEY_SIN, DM_SIN, DMCP_F(DM_SIN) },
-    { KEY_COS, DM_COS, DMCP_F(DM_COS) },
-    { KEY_TAN, DM_TAN, DMCP_F(DM_TAN) },
-    { KEY_LN,  DM_LN,  DMCP_F(DM_LN) },              // ln  / e^x
-    { KEY_LOG, DM_LOG, DMCP_F(DM_LOG) },             // log / 10^x
+    { KEY_SIN,            DM_SIN,           DMCP_F(DM_SIN),  DM_LN },           // [E]
+    { KEY_COS,            DM_COS,           DMCP_F(DM_COS),  DM_XEQ },          // [F]
+    { KEY_TAN,            DM_TAN,           DMCP_F(DM_TAN),  DM_STO },          // [G]
+    { KEY_LN,             DM_LN,            DMCP_F(DM_LN),   DM_RCL },          // [H] ln  / e^x
+    { KEY_LOG,            DM_LOG,           DMCP_F(DM_LOG),  DM_RDN },          // [I] log / 10^x
 
-    { KEY_X2,           DMCP_F(DM_SQRT), DM_SQRT },        // x^2 / sqrt
-    { KEY_XY,           DMCP_F(DM_INV),  DMCP_G(DM_RDN) }, // y^x / x-th root
-    { KEY_LEFTBRACKET,  DM_RDN,  0 },
-    { KEY_RIGHTBRACKET, DM_SWAP, 0 },
-    { KEY_DIVISION,     DM_DIV,  DM_INV },                 // /   / 1/x
+    { KEY_X2,             DMCP_F(DM_SQRT),  DM_SQRT,         DM_SIN },          // [J] x^2 / sqrt
+    { KEY_XY,             DMCP_F(DM_INV),   DMCP_G(DM_RDN),  DM_COS },          // [K] y^x / x-th root
+    { KEY_LEFTBRACKET,    DM_RDN,           0,               DM_TAN },          // [L]
+    { KEY_RIGHTBRACKET,   DM_SWAP,          0,               DM_SWAP },         // [M]
+    { KEY_DIVISION,       DM_DIV,           DM_INV,          DM_CHS },          // [N] /   / 1/x
 
-    { KEY_COMMA,          DM_RUN, DMCP_G(DM_DOT) },        // R/S / Mem: INFO
-    { KEY_7,              DM_7,   DMCP_F(DM_DIV) },        // 7   / List: STAT
-    { KEY_8,              DM_8,   0 },
-    { KEY_9,              DM_9,   0 },
-    { KEY_MULTIPLICATION, DM_MUL, DMCP_F(DM_MUL) },        // x   / !: PROB
+    { KEY_COMMA,          DM_RUN,           DMCP_G(DM_DOT),  DM_E },            // [O] R/S / Mem: INFO
+    { KEY_7,              DM_7,             DMCP_F(DM_DIV),  DM_7 },            // [P] 7   / List: STAT
+    { KEY_8,              DM_8,             0,               DM_8 },            // [Q]
+    { KEY_9,              DM_9,             0,               DM_9 },            // [R]
+    { KEY_MULTIPLICATION, DM_MUL,           DMCP_F(DM_MUL),  DM_DIV },          // [S] x   / !: PROB
 
-    { KEY_ALPHA,       DMCP_F(DM_XEQ), DMCP_F(DM_XEQ) },   // AIM
-    { KEY_4,           DM_4,   DMCP_F(DM_9) },             // 4   / Matrix: MATX
-    { KEY_5,           DM_5,   0 },
-    { KEY_6,           DM_6,   0 },
-    { KEY_SUBTRACTION, DM_SUB, 0 },
+    { KEY_ALPHA,          DMCP_F(DM_XEQ),   DMCP_F(DM_XEQ),  0 },               // AIM
+    { KEY_4,              DM_4,             DMCP_F(DM_9),    DM_4 },            // [T] 4   / Matrix: MATX
+    { KEY_5,              DM_5,             0,               DM_5 },            // [U]
+    { KEY_6,              DM_6,             0,               DM_6 },            // [V]
+    { KEY_SUBTRACTION,    DM_SUB,           0,               DM_MUL },          // [W]
 
-    { KEY_1,    DM_1,   DMCP_F(DM_RUN) },                  // 1   / Prgm: P/R
-    { KEY_2,    DM_2,   DMCP_G(DM_SIN) },                  // 2   / i: j
-    { KEY_3,    DM_3,   DMCP_F(DM_RDN) },                  // 3   / pi
-    { KEY_PLUS, DM_ADD, DM_SIGMA },                        // +   / Sigma+
+    { KEY_1,              DM_1,             DMCP_F(DM_RUN),  DM_1 },            // [X] 1   / Prgm: P/R
+    { KEY_2,              DM_2,             DMCP_G(DM_SIN),  DM_2 },            // [Y] 2   / i: j
+    { KEY_3,              DM_3,             DMCP_F(DM_RDN),  DM_3 },            // [Z] 3   / pi
+    { KEY_PLUS,           DM_ADD,           DM_SIGMA,        DM_ADD },          // [space] +   / Sigma+
 
-    { KEY_0,        DM_0,     0 },
-    { KEY_DOT,      DM_DOT,   0 },
-    { KEY_NEGATIVE, DM_CHS,   DMCP_F(DM_STO) },            // +/- / ABS: |x|
-    { KEY_ENTER,    DM_ENTER, DMCP_F(DM_SWAP) },           // ENTER / ANS: LASTx
+    { KEY_0,              DM_0,             0,               DMCP_G(DM_0) },    // [0]
+    { KEY_DOT,            DM_DOT,           0,               DM_0 },            // [:]
+    { KEY_NEGATIVE,       DM_CHS,           DMCP_F(DM_STO),  DMCP_G(DM_SUB) },  // [-] +/- / ABS: |x|
+    { KEY_ENTER,          DM_ENTER,         DMCP_F(DM_SWAP), 0 },               // ENTER / ANS: LASTx
 };
 
 static const char *const c47_keymap_help[] = {
@@ -164,6 +166,8 @@ static const char *const c47_keymap_help[] = {
     "(-)   CHS/|x|       ENTER ENTER/LASTx",
     "LEFT  x<>y          RIGHT Rv",
     "ON    EXIT          SHIFT+ON standby",
+    "ALPHA then keys: letters as printed,",
+    "      + space. SHIFT: lowercase",
     "Others: SHIFT = C47 f on that key",
 };
 

@@ -65,8 +65,16 @@ left, then right shift), so nothing the application offers is out of reach.
 | arrows | | ▲▼; ◀ x↔y, ▶ R↓ | ◀▲ cursor left / up, ▶▼ right / down |
 | `F1`–`F6` | | softkeys | softkeys: `SHIFT`+F picks the middle menu row, `SHIFT` twice + F the top row; hold an F key for help on its command |
 
+**Alpha mode** (`ALPHA`; C47's AIM or equation entry, DB48X's alpha): keys type
+the letters printed on the case, `VARS` A, `MATH` B … `3` Z, `+` space, `.`
+colon, `(-)` minus, and `0` a double quote in DB48X (a 0 in C47). `SHIFT` gives
+the app's own shifted letter on that key: lowercase in C47 (`SHIFT` twice:
+digits and Greek), digits and symbols in DB48X (`SHIFT` twice: more symbols).
+In DB48X, `SHIFT`+`ENTER` switches between upper and lower case. ENTER, ←,
+the arrows and the F keys work as usual.
+
 The tables live in `System/c47/c47_app.c` and `System/db48x/db48x_app.c`
-(`dmcp_key_t`: 39gII key, plain meaning, `SHIFT` meaning).
+(`dmcp_key_t`: 39gII key, plain meaning, `SHIFT` meaning, alpha meaning).
 
 ## C47
 

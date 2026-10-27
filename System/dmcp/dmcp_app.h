@@ -29,10 +29,16 @@ enum {
 #define DMCP_ACT_VIEWS      0x8001  // cycle the display scaling mode
 #define DMCP_ACT_KEYMAP     0x8002  // show this application's key overlay
 
+// In the application's alpha mode, "alpha" is the DM42 key that carries the
+// letter printed on the 39gII key (VARS A, MATH B, ... 3 Z), and SHIFT applies
+// the application's shift planes to it. It may instead be one character with
+// its shifts included (DMCP_F/DMCP_G), for legends the application keeps on a
+// shifted plane. Zero: the key keeps its DM42 key in alpha mode.
 typedef struct {
     uint16_t k39;       // HP 39gII KEY_* code
     uint16_t plain;
     uint16_t shifted;
+    uint16_t alpha;
 } dmcp_key_t;
 
 // One DMCP platform layer (dmcp_existos.c) serves whichever application is

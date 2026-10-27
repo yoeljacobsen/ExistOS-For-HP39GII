@@ -235,6 +235,19 @@ This matters because DB48X's Off, which APPS sends to quit, leaves its left
 shift set and never returns, so the next launch started shifted and SHIFT+VIEWS
 ran `+` instead of Help.
 
+Alpha mode: each table entry also has an `alpha` meaning, the DM42 key that
+carries the letter printed on the 39gII key in that app (both apps use the
+DM42 letter layout, so A is Σ+, J is SIN, P is 7...; space differs: C47 +,
+DB48X R/S). While `indicators()` reports A..Z or a..z, `dmcp_key_meaning()`
+sends that key and applies SHIFT as the app's own shift on it. The C47 glue
+used to test `calcMode` 3 and 11 for alpha, which are program entry and
+confirmation mode; AIM is 1 and EIM 13.
+
+Physical key events are queued raw and translated only when the app has taken
+every DM42 key before them (`dmcp_translate_keys()`), because a key's meaning
+depends on app state (shift plane, alpha) that a queued key has not changed yet:
+ALPHA then VARS, typed quickly, must see alpha on.
+
 SHIFT+ON is standby, in the launcher and inside an app: panel off
 (`ll_disp_sleep`), slow clock, wait for ON, swallow its release, restore the
 power-save setting, redraw. The app is suspended, not stopped, and resumes with
