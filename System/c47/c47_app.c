@@ -29,15 +29,27 @@ extern void    *freeMemoryRegions;
 extern uint8_t  inKeyBuffer(uint8_t byte);
 extern void     clearKeyBuffer(void);
 
+// C47's glyph_t and font_t (typeDefinitions.h).
 typedef struct {
     uint16_t charCode;
     uint8_t  colsBeforeGlyph;
     uint8_t  colsGlyph;
     uint8_t  colsAfterGlyph;
+    uint8_t  rowsAboveGlyph;
     uint8_t  rowsGlyph;
+    uint8_t  rowsBelowGlyph;
+    int16_t  rank1;
+    int16_t  rank2;
     char    *data;
 } c47_glyph_t;
+typedef struct {
+    int8_t      id;
+    uint16_t    numberOfGlyphs;
+    c47_glyph_t glyphs[];
+} c47_font_t;
 extern c47_glyph_t glyphNotFound;
+extern const c47_font_t standardFont, tinyFont;
+extern const int KEY_X[7];
 
 // RAM_SIZE_IN_BLOCKS (65534) blocks of 2^BPB (4) bytes.
 #define C47_RAM_POOL_BYTES (65534u * 4u)
@@ -53,6 +65,127 @@ static int c47_indicators(void) {
         ind |= INDICATE_BUSY;
     }
     return ind;
+}
+
+// Softkey labels at the panel's own resolution. C47 writes them in its 20-pixel
+// standard font, and the 400x240 -> 256x127 downscale leaves that a blur on a
+// 12-pixel key. C47 also has a tiny font, 8 pixels high with the whole
+// character set, which fits that key 1:1. The link wraps showString(): after
+// C47 has drawn a label, the same text goes to the platform layer in the tiny
+// font (dmcp_crisp_label), which shows it in place of the downscale while the
+// key stays as drawn.
+#define C47_SOFTKEY_ROW0   217    // 217 - SOFTMENU_HEIGHT * row: a key's top line
+#define C47_SOFTKEY_HEIGHT 23
+#define C47_LABEL_ROWS     8
+
+uint32_t __real_showString(const char *string, const c47_font_t *font, uint32_t x,
+                           uint32_t y, int videoMode, bool showLeadingCols,
+                           bool showEndingCols);
+
+static const c47_glyph_t *c47_tiny_glyph(uint16_t code) {
+    int lo = 0, hi = tinyFont.numberOfGlyphs - 1;
+    while (lo <= hi) {
+        int mid = (lo + hi) / 2;
+        uint16_t c = tinyFont.glyphs[mid].charCode;
+        if (c == code) return &tinyFont.glyphs[mid];
+        if (c < code) lo = mid + 1; else hi = mid - 1;
+    }
+    return NULL;
+}
+
+// Characters the standard font has and the tiny font lacks, mapped to the tiny
+// glyph closest in meaning: bold superscripts to plain ones, small capitals to
+// capitals, accented letters to the letter, the extra space widths to spaces.
+// A label with any other missing character keeps the downscale. (Halving the
+// standard glyph, as C47 does, turns its two-pixel strokes into blots.)
+static const uint16_t c47_tiny_subst[][2] = {
+    { 0x82E3, 0xA499 }, { 0x82B0, 0xA489 }, { 0x82B3, 0xA493 },   // SUP_BOLD x h r
+    { 0x9D40, 0xA4C9 }, { 0x9D4D, 0xA488 }, { 0x9DA0, 0xA487 },   // SUP_BOLD T g f
+    { 0xA147, 'e' },                                              // EulerE
+    { 0x828F, 'Y' }, { 0x8299, 'B' }, { 0x829F, 'L' }, { 0x8459, 'X' },
+    { 0x845A, 'A' }, { 0x9D04, 'C' }, { 0x9D05, 'D' }, { 0x9D1B, 'T' },
+    { 0x9D22, 'Z' },                                              // SMALLCAP_*
+    { 0xA003, ' ' }, { 0xA006, 0xA005 }, { 0xA008, 0xA005 }, { 0xA00A, 0xA005 },
+    { 0xA211, 0x83A3 },                                           // SUM -> SIGMA
+    { 0x83D1, 0x83B8 }, { 0x83D5, 0x83C6 },                       // theta, phi_m
+    { 0x8380, 'u' }, { 0x8381, 'v' }, { 0x8382, 'w' }, { 0x8383, 'z' },
+    { 0x8135, 'j' }, { 0x8137, 'k' }, { 0x838B, 'v' }, { 0x838D, 'z' },
+    { 0x83A2, 'u' }, { 0xA125, 0xA124 },                          // INTEGER_Z_SMALL
+};
+
+// Set the label in the tiny font, at most max_w wide: the font's own spacing if
+// that fits, else one column between glyphs. Returns the width, or 0 if a glyph
+// is missing or it cannot be made to fit.
+static int c47_tiny_label(const char *s, uint64_t *rows, int max_w) {
+    for (int tight = 0; tight < 2; tight++) {
+        memset(rows, 0, C47_LABEL_ROWS * sizeof(uint64_t));
+        int x = 0, w = 0;
+        bool first = true;
+        const uint8_t *p = (const uint8_t *)s;
+        while (*p) {
+            uint16_t code = *p++;
+            if (code & 0x80) {
+                if (!*p) return 0;
+                code = (uint16_t)((code << 8) | *p++);
+            }
+            if (code == 0x01) continue;            // STD_NOCHAR: nothing drawn
+            const c47_glyph_t *g = c47_tiny_glyph(code);
+            for (size_t i = 0; !g && i < sizeof(c47_tiny_subst) / sizeof(c47_tiny_subst[0]); i++) {
+                if (c47_tiny_subst[i][0] == code) g = c47_tiny_glyph(c47_tiny_subst[i][1]);
+            }
+            if (!g) return 0;
+            if (g->colsGlyph == 0) {               // a space
+                int adv = g->colsBeforeGlyph + g->colsAfterGlyph;
+                x += tight ? (adv + 1) / 2 : adv;
+                continue;
+            }
+            if (!tight && !first) x += g->colsBeforeGlyph;
+            if (x + g->colsGlyph > 64) return 0;
+            const uint8_t *d = (const uint8_t *)g->data;
+            int stride = (g->colsGlyph + 7) / 8;
+            for (int r = 0; r < g->rowsGlyph; r++) {
+                int y = g->rowsAboveGlyph + r;
+                uint64_t bits = 0;
+                for (int b = 0; b < stride; b++) {
+                    bits |= (uint64_t)d[r * stride + b] << (56 - 8 * b);
+                }
+                if (y < C47_LABEL_ROWS) rows[y] |= bits >> x;
+            }
+            x += g->colsGlyph;
+            w = x;
+            x += tight ? 1 : g->colsAfterGlyph;
+            first = false;
+        }
+        if (w <= max_w) return w;
+    }
+    return 0;
+}
+
+uint32_t __wrap_showString(const char *string, const c47_font_t *font, uint32_t x,
+                           uint32_t y, int videoMode, bool showLeadingCols,
+                           bool showEndingCols) {
+    uint32_t end = __real_showString(string, font, x, y, videoMode,
+                                     showLeadingCols, showEndingCols);
+
+    // showKey() draws a label at its key's top line + 2, centred, or 4 pixels
+    // left of centre when a checkbox sits at the right.
+    if (font != &standardFont || end <= x || x >= 400) return end;
+    int top = (int)y - 2;
+    int row = (C47_SOFTKEY_ROW0 - top) / C47_SOFTKEY_HEIGHT;
+    if (row < 0 || row > 2 || top != C47_SOFTKEY_ROW0 - C47_SOFTKEY_HEIGHT * row) return end;
+    int centre = (int)(x + end) / 2;
+    int col = 0;
+    while (col < 5 && centre >= KEY_X[col + 1]) col++;
+    int x1 = KEY_X[col], x2 = KEY_X[col + 1];
+    int off = (x1 + x2) / 2 - centre;
+    if (off < -6 || off > 6) return end;
+
+    int box_x0 = x1 + 1, box_x1 = (off >= 3) ? x2 - 12 : x2;
+    uint64_t rows[C47_LABEL_ROWS];
+    int w = c47_tiny_label(string, rows, ((box_x1 - box_x0) * 256) / 400 - 2);
+    dmcp_crisp_label(box_x0, top + 1, box_x1, top + C47_SOFTKEY_HEIGHT,
+                     (int)x, (int)end, videoMode != 0, rows, w, C47_LABEL_ROWS);
+    return end;
 }
 
 static void c47_run(void) {

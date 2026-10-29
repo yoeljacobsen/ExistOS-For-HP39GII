@@ -242,6 +242,239 @@ static bool c47_ink_background(int cy0, int cy1, int cx0, int cx1) {
     return 2 * ink > total;
 }
 
+// The rows of the 400x240 image that panel row dy shows, cy0..cy1 end-exclusive,
+// in display modes 0 and 1.
+static void c47_src_rows(int dy, int *cy0, int *cy1) {
+    int y0, y1;
+    if (c47_disp_mode == 0) {
+        y0 = (dy * LCD_Y) / LCD_PIX_H;
+        y1 = ((dy + 1) * LCD_Y) / LCD_PIX_H;
+    } else if (c47_hidden_top > 0) {
+        // Header dropped: stretch what is left over the whole panel.
+        // c47_hidden_top is biased by one so that zero still means
+        // "this application has no opinion".
+        int top  = c47_hidden_top - 1;
+        int span = LCD_Y - top;
+        y0 = top + (dy * span) / LCD_PIX_H;
+        y1 = top + ((dy + 1) * span) / LCD_PIX_H;
+    } else {
+        // Mode 1:
+        //   dy 0..11   (12 rows) -> cy 0..17    (18 rows: status bar)
+        //   dy 12..98  (87 rows) -> cy 84..199  (116 rows: Z, Y, X registers / AIM / NIM / PEM)
+        //   dy 99..126 (28 rows) -> cy 200..239 (40 rows: softmenu bar)
+        if (dy < 12) {
+            y0 = (dy * 18) / 12;
+            y1 = ((dy + 1) * 18) / 12;
+        } else if (dy < 99) {
+            y0 = 84 + ((dy - 12) * 116) / 87;
+            y1 = 84 + ((dy - 11) * 116) / 87;
+        } else {
+            y0 = 200 + ((dy - 99) * 40) / 28;
+            y1 = 200 + ((dy - 98) * 40) / 28;
+        }
+    }
+    if (y1 <= y0) y1 = y0 + 1;
+    if (y1 > LCD_Y) y1 = LCD_Y;
+    *cy0 = y0;
+    *cy1 = y1;
+}
+
+// Labels redrawn at the panel's resolution (dmcp_crisp_label). The application
+// task adds them while it draws; the display task shows them. A label is only
+// trusted once the application has gone idle or asked for a refresh after
+// drawing it (dmcp_frame_seq has moved on), so a checkbox or anything else
+// drawn into the key afterwards is part of what the box is expected to hold.
+#define DMCP_LABELS     24
+#define DMCP_LABEL_ROWS 10
+
+typedef struct {
+    uint32_t id;            // 0: free
+    uint32_t seq;           // dmcp_frame_seq when it was drawn
+    uint32_t sum;           // the box's pixels, once settled
+    bool     settled;
+    bool     inverse;
+    int16_t  x0, y0, x1, y1;
+    int16_t  tx0, tx1;
+    uint8_t  w, h;
+    uint64_t rows[DMCP_LABEL_ROWS];
+} dmcp_label_t;
+
+static dmcp_label_t dmcp_labels[DMCP_LABELS];
+static uint32_t dmcp_label_ids = 0;
+static volatile uint32_t dmcp_frame_seq = 0;
+
+// Where a label lands on the panel, worked out once per flush.
+typedef struct {
+    const dmcp_label_t *l;
+    int dx0, dx1, dy0, dy1;   // the box, panel pixels wholly inside it
+    int ex0, ex1;             // columns to clear: the bitmap and the old text
+    int bx, by;               // the bitmap's top left
+} dmcp_label_place_t;
+
+static dmcp_label_t       dmcp_label_snap[DMCP_LABELS];
+static dmcp_label_place_t dmcp_label_place[DMCP_LABELS];
+static int                dmcp_label_count = 0;
+
+void dmcp_crisp_label(int box_x0, int box_y0, int box_x1, int box_y1,
+                      int text_x0, int text_x1, bool inverse,
+                      const uint64_t *rows, int w, int h) {
+    if (box_x0 < 0) box_x0 = 0;
+    if (box_x1 > LCD_X) box_x1 = LCD_X;
+    if (box_y0 < 0) box_y0 = 0;
+    if (box_y1 > LCD_Y) box_y1 = LCD_Y;
+    bool usable = w > 0 && w <= 64 && h > 0 && h <= DMCP_LABEL_ROWS &&
+                  box_x0 < box_x1 && box_y0 < box_y1;
+
+    vTaskSuspendAll();
+    // Whatever the new label covers is gone, even when the new one cannot be
+    // shown: its pixels have changed, and the downscale shows them.
+    dmcp_label_t *slot = NULL;
+    for (int i = 0; i < DMCP_LABELS; i++) {
+        dmcp_label_t *l = &dmcp_labels[i];
+        if (l->id && l->x0 < box_x1 && box_x0 < l->x1 &&
+            l->y0 < box_y1 && box_y0 < l->y1) {
+            l->id = 0;
+        }
+        if (!l->id && (!slot || slot->id)) {
+            slot = l;
+        } else if (slot && slot->id && l->id < slot->id) {
+            slot = l;               // none free yet: the oldest goes
+        }
+    }
+    if (usable) {
+        slot->id      = ++dmcp_label_ids ? dmcp_label_ids : ++dmcp_label_ids;
+        slot->seq     = dmcp_frame_seq;
+        slot->settled = false;
+        slot->inverse = inverse;
+        slot->x0 = (int16_t)box_x0;  slot->y0 = (int16_t)box_y0;
+        slot->x1 = (int16_t)box_x1;  slot->y1 = (int16_t)box_y1;
+        slot->tx0 = (int16_t)text_x0;
+        slot->tx1 = (int16_t)text_x1;
+        slot->w = (uint8_t)w;
+        slot->h = (uint8_t)h;
+        memcpy(slot->rows, rows, (size_t)h * sizeof(uint64_t));
+    }
+    xTaskResumeAll();
+}
+
+// Whether a label is still being drawn: flushing now would show it blurred for
+// one frame and sharp the next.
+static bool dmcp_labels_unsettled(void) {
+    uint32_t seq = dmcp_frame_seq;
+    for (int i = 0; i < DMCP_LABELS; i++) {
+        if (dmcp_labels[i].id && !dmcp_labels[i].settled && dmcp_labels[i].seq == seq) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static uint32_t dmcp_label_sum(const dmcp_label_t *l) {
+    uint32_t sum = 0x811C9DC5u;
+    for (int y = l->y0; y < l->y1; y++) {
+        const uint8_t *line = &c47_raw_lcd_buf[y * 52];
+        for (int x = l->x0; x < l->x1; x++) {
+            sum = (sum ^ (uint32_t)c47_px_black(line, x)) * 0x01000193u;
+        }
+    }
+    return sum;
+}
+
+// Take the labels that still match the image, and place them for this flush.
+static void dmcp_labels_prepare(void) {
+    dmcp_label_count = 0;
+    if (c47_disp_mode == 2 || c47_help_page != 0) {
+        return;
+    }
+    vTaskSuspendAll();
+    memcpy(dmcp_label_snap, dmcp_labels, sizeof(dmcp_labels));
+    uint32_t seq = dmcp_frame_seq;
+    xTaskResumeAll();
+
+    for (int i = 0; i < DMCP_LABELS; i++) {
+        dmcp_label_t *l = &dmcp_label_snap[i];
+        if (!l->id) continue;
+        if (!l->settled && l->seq == seq) continue;   // still being drawn
+        uint32_t sum = dmcp_label_sum(l);
+        bool keep = !l->settled || sum == l->sum;
+        vTaskSuspendAll();
+        if (dmcp_labels[i].id == l->id) {
+            if (!keep) {
+                dmcp_labels[i].id = 0;
+            } else if (!l->settled) {
+                dmcp_labels[i].settled = true;
+                dmcp_labels[i].sum = sum;
+            }
+        } else {
+            keep = false;                             // replaced meanwhile
+        }
+        xTaskResumeAll();
+        if (!keep) continue;
+
+        // Panel pixels lying wholly inside the box.
+        int dx0 = -1, dx1 = -1, dy0 = -1, dy1 = -1;
+        for (int dx = 0; dx < LCD_PIX_W; dx++) {
+            if (c47_col_x0[dx] >= l->x0 && c47_col_x0[dx + 1] <= l->x1) {
+                if (dx0 < 0) dx0 = dx;
+                dx1 = dx + 1;
+            }
+        }
+        for (int dy = 0; dy < LCD_PIX_H; dy++) {
+            int cy0, cy1;
+            c47_src_rows(dy, &cy0, &cy1);
+            if (cy0 >= l->y0 && cy1 <= l->y1) {
+                if (dy0 < 0) dy0 = dy;
+                dy1 = dy + 1;
+            }
+        }
+        if (dx0 < 0 || dy0 < 0 || dx1 - dx0 < l->w || dy1 - dy0 < l->h) {
+            continue;                                 // does not fit: downscale
+        }
+
+        dmcp_label_place_t *p = &dmcp_label_place[dmcp_label_count++];
+        p->l   = l;
+        p->dx0 = dx0;  p->dx1 = dx1;
+        p->dy0 = dy0;  p->dy1 = dy1;
+        p->bx  = dx0 + (dx1 - dx0 - l->w) / 2;
+        p->by  = dy0 + (dy1 - dy0 - l->h) / 2;
+        // Clear the old text and the new, not the whole key: C47 marks keys
+        // with dots near their corners in some modes.
+        int ex0 = p->bx - 1, ex1 = p->bx + l->w + 1;
+        for (int dx = dx0; dx < dx1; dx++) {
+            int cx0 = c47_col_x0[dx], cx1 = c47_col_x0[dx + 1];
+            if (cx1 > l->tx0 && cx0 < l->tx1) {
+                if (dx < ex0) ex0 = dx;
+                if (dx + 1 > ex1) ex1 = dx + 1;
+            }
+        }
+        p->ex0 = ex0 < dx0 ? dx0 : ex0;
+        p->ex1 = ex1 > dx1 ? dx1 : ex1;
+    }
+}
+
+// Draw the placed labels over a strip of the downscaled image.
+static void dmcp_labels_draw(uint8_t *strip, int sy0, int sh) {
+    for (int i = 0; i < dmcp_label_count; i++) {
+        const dmcp_label_place_t *p = &dmcp_label_place[i];
+        const dmcp_label_t *l = p->l;
+        uint8_t bg = l->inverse ? C47_INK : C47_PAPER;
+        uint8_t fg = l->inverse ? C47_PAPER : C47_INK;
+        for (int dy = p->dy0; dy < p->dy1; dy++) {
+            if (dy < sy0 || dy >= sy0 + sh) continue;
+            uint8_t *dst = &strip[(dy - sy0) * LCD_PIX_W];
+            memset(&dst[p->ex0], bg, (size_t)(p->ex1 - p->ex0));
+            int r = dy - p->by;
+            if (r < 0 || r >= l->h) continue;
+            uint64_t bits = l->rows[r];
+            for (int c = 0; c < l->w; c++) {
+                if (bits & (0x8000000000000000ull >> c)) {
+                    dst[p->bx + c] = fg;
+                }
+            }
+        }
+    }
+}
+
 // Draw a 5x8 ASCII string into the 256-pixel strip buffer (sy0..sy0+sh-1)
 static void strip_draw_str5x8(uint8_t *strip, int sy0, int sh, int x, int y, const char *s, uint8_t fg, uint8_t bg) {
     while (*s) {
@@ -338,6 +571,7 @@ static void c47_flush_screen(void) {
 
     uint32_t now = ll_get_time_ms();
     bool show_banner = (c47_banner_until_ms != 0 && now < c47_banner_until_ms);
+    dmcp_labels_prepare();
 
     for (int sy0 = 0; sy0 < LCD_PIX_H; sy0 += C47_STRIP_ROWS) {
         int sh = C47_STRIP_ROWS;
@@ -368,35 +602,7 @@ static void c47_flush_screen(void) {
             } else {
                 // Mode 0 (Full 400x240) or Mode 1 (Zoomed Status + Stack Y/X + Softkeys)
                 int cy0, cy1;
-                if (c47_disp_mode == 0) {
-                    cy0 = (dy * LCD_Y) / LCD_PIX_H;
-                    cy1 = ((dy + 1) * LCD_Y) / LCD_PIX_H;
-                } else if (c47_hidden_top > 0) {
-                    // Header dropped: stretch what is left over the whole panel.
-                    // c47_hidden_top is biased by one so that zero still means
-                    // "this application has no opinion".
-                    int top  = c47_hidden_top - 1;
-                    int span = LCD_Y - top;
-                    cy0 = top + (dy * span) / LCD_PIX_H;
-                    cy1 = top + ((dy + 1) * span) / LCD_PIX_H;
-                } else {
-                    // Mode 1:
-                    //   dy 0..11   (12 rows) -> cy 0..17    (18 rows: status bar)
-                    //   dy 12..98  (87 rows) -> cy 84..199  (116 rows: Z, Y, X registers / AIM / NIM / PEM)
-                    //   dy 99..126 (28 rows) -> cy 200..239 (40 rows: softmenu bar)
-                    if (dy < 12) {
-                        cy0 = (dy * 18) / 12;
-                        cy1 = ((dy + 1) * 18) / 12;
-                    } else if (dy < 99) {
-                        cy0 = 84 + ((dy - 12) * 116) / 87;
-                        cy1 = 84 + ((dy - 11) * 116) / 87;
-                    } else {
-                        cy0 = 200 + ((dy - 99) * 40) / 28;
-                        cy1 = 200 + ((dy - 98) * 40) / 28;
-                    }
-                }
-                if (cy1 <= cy0) cy1 = cy0 + 1;
-                if (cy1 > LCD_Y) cy1 = LCD_Y;
+                c47_src_rows(dy, &cy0, &cy1);
 
                 const uint8_t *line0 = &c47_raw_lcd_buf[cy0 * 52];
                 const uint8_t *line1 = (cy0 + 1 < cy1) ? &c47_raw_lcd_buf[(cy0 + 1) * 52] : NULL;
@@ -445,6 +651,10 @@ static void c47_flush_screen(void) {
                     dst[dx] = shade;
                 }
             }
+        }
+
+        if (c47_disp_mode != 2) {
+            dmcp_labels_draw(c47_strip_buf, sy0, sh);
         }
 
         if (show_banner && sy0 == 0) {
@@ -508,26 +718,29 @@ void lcd_clear_buf(void) {
 
 void lcd_refresh(void) {
     DMCP_TRACE(lcd_refresh);
+    dmcp_frame_seq++;
     g_dmcp_lines_dirty = true;
 }
 
 void lcd_refresh_dma(void) {
-    
+    dmcp_frame_seq++;
     g_dmcp_lines_dirty = true;
 }
 
 void lcd_refresh_wait(void) {
-    
+    dmcp_frame_seq++;
     g_dmcp_lines_dirty = true;
 }
 
 void lcd_forced_refresh(void) {
     DMCP_TRACE(lcd_forced_refresh);
+    dmcp_frame_seq++;
     g_dmcp_lines_dirty = true;
 }
 
 void lcd_refresh_lines(int ln, int cnt) {
     DMCP_TRACE(lcd_refresh_lines);
+    dmcp_frame_seq++;
     (void)ln;
     (void)cnt;
     g_dmcp_lines_dirty = true;
@@ -1056,6 +1269,7 @@ int sys_timer_timeout(int timer_ix) {
 
 void sys_sleep(void) {
     DMCP_TRACE(sys_sleep);
+    dmcp_frame_seq++;          // whatever was being drawn is finished
 
     // The application may have asked to end itself (DB48X sets STAT_PGM_END and
     // expects sys_sleep() not to return).
@@ -1729,6 +1943,7 @@ static void __attribute__((target("arm"))) dmcp_sampler(void *arg) {
 static void __attribute__((target("arm"))) c47_display_task(void *arg) {
     (void)arg;
     uint32_t idle = 0;
+    uint32_t held = 0;
     for (;;) {
         // Dirty means something was drawn. The periodic flush covers everything
         // else: a banner expiring, a frame the application finished after the
@@ -1738,6 +1953,12 @@ static void __attribute__((target("arm"))) c47_display_task(void *arg) {
         // Nothing reaches a sleeping panel; dmcp_standby() marks the screen
         // dirty when it wakes it.
         if (!dmcp_standing_by && (g_dmcp_lines_dirty || ++idle >= 8)) {
+            // Give the application a few ticks to finish a menu it is drawing.
+            if (dmcp_labels_unsettled() && ++held < 4) {
+                vTaskDelay(pdMS_TO_TICKS(20));
+                continue;
+            }
+            held = 0;
             idle = 0;
             c47_flush_screen();     // clears the flag itself
         }
@@ -1789,6 +2010,7 @@ bool dmcp_run(const dmcp_app_t *app) {
         c47_on_held        = false;
         c47_active_c47_key = 0;
         c47_help_page      = 0;
+        memset(dmcp_labels, 0, sizeof(dmcp_labels));
         // An application that reports a content top has a header the 39gII does
         // not need: shift, alpha and battery live on the hardware annunciator
         // row, outside the bitmap. Start with those rows reclaimed; VIEWS still

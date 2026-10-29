@@ -175,6 +175,33 @@ Also worth keeping: the shipped `rom.g39` was never a Saturn ROM — it is an
 HP 39gs ARM firmware image (`KINPOHP39G+IMAGE`). `load_rom()` learned to say so.
 A real dump (`rom.39g`, 2 M nibbles, unpacked) does work.
 
+### Softkey labels at panel resolution
+
+C47 writes softkey labels in its 20-pixel standard font; downscaled 400x240 ->
+256x127 that is a blur in a 12-pixel key. C47 also has a tiny font (8 pixels,
+7-pixel capitals, nearly the whole character set), which fits the key 1:1.
+
+- The link wraps `showString` (`-Wl,--wrap=showString`, `System/CMakeLists.txt`),
+  so the C47 library is untouched. `__wrap_showString` in `c47_app.c` draws as
+  usual, then recognises a `showKey()` label by its geometry: standard font,
+  y = key top + 2 (219/196/173), centred in a `KEY_X` slot (or 4 px left of
+  centre when a checkbox sits at the right, which it leaves out of the box).
+- It sets the text in the tiny font and hands the bitmap to the platform layer
+  (`dmcp_crisp_label`). 82 standard glyphs are missing from the tiny font;
+  `c47_tiny_subst` maps the ones with an obvious equivalent (bold superscripts,
+  small capitals, Euler e, extra space widths, accented letters). A label with
+  any other missing character keeps the downscale. Halving the standard glyph,
+  as C47 itself does for tiny text, was tried and turns its 2-pixel strokes
+  into blots.
+- The platform layer remembers a checksum of the key's pixels once the
+  application has gone idle or refreshed after drawing (`dmcp_frame_seq`, bumped
+  in `sys_sleep()` and the `lcd_refresh*` calls), and draws the bitmap 1:1 over
+  the downscale while the checksum holds. Anything drawn over the key brings
+  the downscale back. The display task holds a flush up to 80 ms while a label
+  is still unsettled, so menus do not flash blurred first.
+- Mode 2 (1:1 pan) and the key overlay draw no labels. Conversion pairs
+  (`showKey2`, `showStringEnhanced`) are not wrapped yet and stay downscaled.
+
 ## Shared DMCP platform layer
 
 `System/dmcp/` holds one DMCP implementation serving whichever application is

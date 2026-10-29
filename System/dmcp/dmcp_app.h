@@ -106,3 +106,15 @@ void dmcp_show_message(const char *const *lines, int count);
 // Reusable arena for an application's own heap, in place of a malloc() it never
 // frees. See the note in dmcp_existos.c.
 void *dmcp_rpl_arena(size_t size);
+
+// A label the application has just drawn into its 400x240 image, offered again
+// at the panel's own resolution, where the 400x240 -> 256x127 downscale would
+// blur it. box_* is the area the label owns (the inside of a softkey, without
+// any checkbox), text_x0..text_x1 the columns its 400x240 text covers; all in
+// 400x240 pixels, end-exclusive. The bitmap is h rows of w columns, column 0 in
+// bit 63, drawn 1:1 and centred in the box. Once the application has finished
+// drawing, the box's pixels are remembered, and the bitmap is shown for as long
+// as they stay the same; anything drawn over the box brings the downscale back.
+void dmcp_crisp_label(int box_x0, int box_y0, int box_x1, int box_y1,
+                      int text_x0, int text_x1, bool inverse,
+                      const uint64_t *rows, int w, int h);
